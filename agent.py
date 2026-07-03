@@ -2213,7 +2213,24 @@ def main():
     parser.add_argument("--list-sessions", "-l", action="store_true")
     parser.add_argument("--no-disclaimer",       action="store_true")
     parser.add_argument("--no-wizard",           action="store_true")
+    # ── Web UI mode ────────────────────────────────────────────────────
+    parser.add_argument("--web",           action="store_true",
+                        help="Lanzar interfaz web (Flask) en lugar del chat de terminal")
+    parser.add_argument("--port",          type=int, default=7860,
+                        help="Puerto para la interfaz web (default: 7860)")
+    parser.add_argument("--host",          default="127.0.0.1",
+                        help="Host para la interfaz web (default: 127.0.0.1)")
     args = parser.parse_args()
+
+    # ── Dispatch web mode ──────────────────────────────────────────────
+    if args.web:
+        try:
+            from web_server import launch as _web_launch
+        except ImportError as _e:
+            print(f"{RED}✗ Error importando web_server.py: {_e}{R}")
+            sys.exit(1)
+        _web_launch(host=args.host, port=args.port)
+        return
 
     tool_confs    = load_tool_confs()
     tools_context = build_tools_context(tool_confs)
