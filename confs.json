@@ -1,0 +1,67 @@
+{
+    "tools": [
+        {
+            "name": "nuclei",
+            "github": "https://github.com/projectdiscovery/nuclei",
+            "path": "",
+            "command": "nuclei",
+            "install": "apt-get install -y nuclei  OR  go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
+        },
+        {
+            "name": "nuclei-templates",
+            "github": "https://github.com/projectdiscovery/nuclei-templates",
+            "path": "",
+            "command": "",
+            "install": "nuclei -update-templates"
+        },
+        {
+            "name": "Seclist",
+            "github": "https://github.com/danielmiessler/seclists",
+            "path": "/media/sf_CarpetaCompartida/tools/seclists",
+            "command": "",
+            "install": "apt-get install -y seclists"
+        },
+        {
+            "name": "dirsearch",
+            "github": "https://github.com/maurosoria/dirsearch",
+            "path": "",
+            "command": "dirsearch",
+            "install": "apt-get install -y dirsearch  OR  pip3 install dirsearch"
+        },
+        {
+            "name": "subfinder",
+            "github": "https://github.com/projectdiscovery/subfinder",
+            "path": "",
+            "command": "subfinder",
+            "install": "apt-get install -y subfinder  OR  go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
+        },
+        {
+            "name": "amass",
+            "github": "https://github.com/owasp-amass/amass",
+            "path": "",
+            "command": "amass",
+            "install": "apt-get install -y amass  OR  go install github.com/owasp-amass/amass/v4/...@master"
+        },
+        {
+            "name": "ffuf",
+            "github": "https://github.com/ffuf/ffuf",
+            "path": "",
+            "command": "ffuf",
+            "install": "apt-get install -y ffuf"
+        },
+        {
+            "name": "feroxbuster",
+            "github": "https://github.com/epi052/feroxbuster",
+            "path": "",
+            "command": "feroxbuster",
+            "install": "apt-get install -y feroxbuster  OR  curl -sL https://raw.githubusercontent.com/epi052/feroxbuster/main/install-nix.sh | bash"
+        },
+        {
+            "name": "httpx",
+            "github": "https://github.com/projectdiscovery/httpx",
+            "path": "",
+            "command": "httpx",
+            "install": "apt-get install -y httpx  OR  go install github.com/projectdiscovery/httpx/cmd/httpx@latest"
+        }
+    ]
+}

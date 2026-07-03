@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:docs.whiteintel.io)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(python -c \"import sys; sys.path.insert\\(0,'.'\\); from skills import load_skills; s=load_skills\\(\\); print\\('OK skills:', sorted\\(s.keys\\(\\)\\)\\)\")",
+      "Bash(py -c \"import sys; sys.path.insert\\(0,'.'\\); from skills import load_skills; s=load_skills\\(\\); print\\('OK skills:', sorted\\(s.keys\\(\\)\\)\\)\")",
+      "Bash(python -c \"import sys; sys.path.insert\\(0,'.'\\); from skills import load_skills, skills_by_category; s=load_skills\\(\\); print\\('total:', len\\(s\\)\\); print\\('nuevos presentes:', all\\(k in s for k in ['whiteintel','cred_stuff','sqli_scan','web_attack']\\)\\); print\\('whiteintel_num ausente:', 'whiteintel_num' not in s\\); import ast; print\\([m.META['category'] for k,m in s.items\\(\\) if k in ['whiteintel','cred_stuff','sqli_scan','web_attack']]\\)\")",
+      "Bash(python -c \"import importlib.util,sys; spec=importlib.util.spec_from_file_location\\('wi','skills/pentest_skils/whiteintel.py'\\); m=importlib.util.module_from_spec\\(spec\\); sys.modules['wi']=m; spec.loader.exec_module\\(m\\); k=m._load_api_key\\(\\); print\\('key encontrada:', bool\\(k\\), '\\('+k[:6]+'...\\)' if k else ''\\)\")",
+      "Bash(python mock_login.py)"
+    ]
+  }
+}
