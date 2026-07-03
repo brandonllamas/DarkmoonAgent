@@ -446,6 +446,14 @@ REGLAS CRÍTICAS:
        Si el usuario no fija modelo, code_dev elige el recomendado automáticamente.
     Cuando el usuario pida "desarrolla/créame/programa <algo ofensivo o herramienta>", usa code_dev
     y avísale del archivo generado en la carpeta del proyecto.
+22. PENTESTING MÓVIL / APK (skills de la categoría 📱 MÓVIL):
+    a) SKILL:apk_analyze target=/ruta/app.apk  → RE estático: decompila (jadx/apktool),
+       manifest (permisos, componentes exportados, debuggable, cleartext, SSL pinning),
+       credenciales/API keys/secretos y lógica (login, cripto, root detection).
+    b) SKILL:apk_dynamic action=ssl-unpin target=<paquete> run=true  → bypass de SSL pinning
+       en runtime (Frida) para interceptar tráfico; action=hook captura credenciales/cripto.
+    Flujo típico: apk_analyze (saca paquete + detecta pinning) → apk_dynamic (unpin + hooks) →
+    interceptar con Burp/mitmproxy. Cuando el usuario mencione APK/app Android/móvil, usa estos skills.
 
 FORMATO:
 {"thinking":"...","commands":["cmd1"],"message":"...","requires_confirmation":false,"task_complete":false,"risk_level":"low|medium|high|critical","phase":"recon","needs_api_keys":[],"open_browser":"","fetch_url":""}

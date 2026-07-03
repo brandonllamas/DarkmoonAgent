@@ -16,13 +16,14 @@ CATEGORY_LABELS = {
     "analisis":     "🔬 ANÁLISIS DE CÓDIGO / CONTENIDO",
     "ing_inversa":  "🔬 INGENIERÍA INVERSA",
     "ataque":       "💥 ATAQUE / EXPLOTACIÓN",
+    "movil":        "📱 PENTESTING MÓVIL / APK",
     "desarrollo":   "🛠  DESARROLLO DE CÓDIGO / MALWARE",
     "otros":        "⚙  OTROS",
 }
 
 CATEGORY_ORDER = [
     "recon_pasivo", "recon_activo", "vuln_scan",
-    "analisis", "ing_inversa", "ataque", "desarrollo", "otros",
+    "analisis", "ing_inversa", "ataque", "movil", "desarrollo", "otros",
 ]
 
 

@@ -28,9 +28,12 @@ HackerAgent/
 │   │   └── wpscan_run.py           # WPScan con API key automática
 │   ├── inginversa_skills/
 │   │   └── agent_ing.py            # Skill RE + agente interactivo standalone
+│   ├── movil_skills/
+│   │   ├── apk_analyze.py          # RE estático de APK: manifest, secretos, lógica, SSL pinning
+│   │   └── apk_dynamic.py          # Frida: bypass SSL pinning + hooks de credenciales/cripto
 │   └── dev_skills/
-│       ├── model_advisor.py        # Recomienda qué modelo Ollama usar por tarea
-│       └── code_dev.py             # Desarrolla código (pentest/malware) con modelo local → out/<proj>/dev/
+│       ├── model_advisor.py        # Recomienda modelo Ollama + prepara toolchain del lenguaje
+│       └── code_dev.py             # Desarrolla código (pentest/malware) → out/<proj>/dev/ (pipenv+linters)
 ├── out/                            # out/<nombre_proyecto>/  (creado por picker)
 └── out_re/                         # out_re/<binname>/  (ing_inversa standalone)
 ```
@@ -72,6 +75,7 @@ CATEGORY_LABELS = {
     "analisis":     "🔬 ANÁLISIS DE CÓDIGO",          # spider_code, web_code
     "ing_inversa":  "🔬 INGENIERÍA INVERSA",          # ing_inversa
     "ataque":       "💥 ATAQUE / EXPLOTACIÓN",        # metasploit, cred_stuff
+    "movil":        "📱 PENTESTING MÓVIL / APK",       # apk_analyze, apk_dynamic
     "desarrollo":   "🛠 DESARROLLO DE CÓDIGO / MALWARE", # model_advisor, code_dev
     "otros":        "⚙  OTROS",
 }
@@ -99,9 +103,12 @@ SKILL:spider_code target=https://example.com
 SKILL:web_code target=https://example.com
 SKILL:web_code target=https://example.com max_files=50
 SKILL:ing_inversa target=/ruta/al/binario
-SKILL:model_advisor kind=malware
+SKILL:model_advisor kind=pentest language=python setup=true
 SKILL:code_dev request="reverse shell TCP con reconexión" kind=payload language=python
 SKILL:code_dev request="keylogger sigiloso" kind=malware language=c model=dolphin-mistral:latest
+SKILL:apk_analyze target=/ruta/app.apk
+SKILL:apk_dynamic action=ssl-unpin target=com.ejemplo.app run=true
+SKILL:apk_dynamic action=hook target=com.ejemplo.app
 SKILL:metasploit mode=search cve=CVE-2017-0144
 SKILL:metasploit mode=exploit target=10.10.11.1 module=exploit/windows/smb/ms17_010_eternalblue lhost=10.10.14.1
 SKILL:metasploit mode=scan target=192.168.1.0/24
@@ -144,7 +151,9 @@ def run(**kwargs) -> dict:
 | `whiteintel` | set user:pass filtrado | credencial individual / leaked_credential | — | — | — |
 | `cred_stuff` | valid_credential (login OK) | — | — | — | — |
 | `code_dev` | — | — | model_warning | — | code_generated |
-| `model_advisor` | — | — | model_warning | — | model_recommendation |
+| `model_advisor` | — | — | model_warning | — | model_recommendation / toolchain |
+| `apk_analyze` | apk_secret (creds/keys) | apk_exported / debuggable / JWT | permisos / cleartext / logic | SharedPreferences | URLs / lógica |
+| `apk_dynamic` | — | ssl_unpin_active | — | — | mobile_artifact (scripts Frida) |
 | `spider_code` | credenciales/firebase/aws | api_keys | endpoints | internal_network | source maps |
 | `web_code` | firebase_config / credential / source_map_exposed | firebase_collection / storage_ref | api_endpoint / websocket / env_vars | — | framework / librería / nav_route |
 | `ing_inversa` | bypass exitoso / hardcoded_credential | función auth | bypass falló | NX/PIE | tipo binario / file_used |

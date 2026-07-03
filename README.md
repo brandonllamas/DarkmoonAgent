@@ -9,7 +9,7 @@
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Ollama](https://img.shields.io/badge/Ollama-local-000000?style=for-the-badge&logo=ollama&logoColor=white)
 ![Kali](https://img.shields.io/badge/Kali_Linux-557C94?style=for-the-badge&logo=kalilinux&logoColor=white)
-![Skills](https://img.shields.io/badge/skills-18-F7768E?style=for-the-badge)
+![Skills](https://img.shields.io/badge/skills-21-F7768E?style=for-the-badge)
 ![Multiagente](https://img.shields.io/badge/multi--agente-SubAgents-BB9AF7?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-9ECE6A?style=for-the-badge)
 
@@ -17,7 +17,7 @@
 
 <div align="center">
 
-### 🧠 IA local (Ollama) · ⚡ 18 skills · 🔬 RE + bypass · 🕸️ web dinámico · 🔑 credential intel · 🛠️ dev de código
+### 🧠 IA local (Ollama) · ⚡ 21 skills · 🔬 RE + bypass · 🕸️ web dinámico · 🔑 credential intel · 🛠️ dev de código
 
 </div>
 
@@ -109,7 +109,7 @@ BROWSER="firefox"
 
 ---
 
-## 🧩 Skills (18)
+## 🧩 Skills (21)
 
 <div align="center">
 
@@ -119,22 +119,25 @@ BROWSER="firefox"
 | `google_dorks` | 🔍 recon pasivo | Google dorks de seguridad |
 | `shodan_query` | 🔍 recon pasivo | Shodan API + InternetDB fallback |
 | `subfinder_enum` | 🔍 recon pasivo | Subfinder + verificación HTTP (httpx) |
-| ✨ `whiteintel` | 🔍 recon pasivo | Descarga credenciales filtradas (stealer logs) |
-| `gobuster_dir` | ⚡ recon activo | Fuzzing de directorios (maneja wildcard 403) |
+| `whiteintel` | 🔍 recon pasivo | Descarga credenciales filtradas de stealer logs |
+| ✨ `whiteintel_num` | 🔍 recon pasivo | API WhiteIntel.io — consulta creds expuestas por dominio/empresa, enumera logins/dominios/software, guarda en `credentials/` |
+| `gobuster_dir` | ⚡ recon activo | Fuzzing de directorios (auto-retry wildcard 403) |
 | `scan_red` | ⚡ recon activo | Nmap con clasificación de puertos críticos |
 | `nuclei_scan` | 🎯 vuln scan | Nuclei con auto-detección de templates + JSON |
 | `wpscan_run` | 🎯 vuln scan | WPScan con API key automática |
-| ✨ `sqli_scan` | 🎯 vuln scan | Detecta **y extrae** SQLi con sqlmap (+ fallback) |
-| ✨ `web_attack` | 🎯 vuln scan | Pentest web dinámico: SQLi/XSS/LFI/redirect/cmdi |
+| `sqli_scan` | 🎯 vuln scan | Detecta **y extrae** SQLi con sqlmap (+ fallback) |
+| `web_attack` | 🎯 vuln scan | Pentest web dinámico: SQLi/XSS/LFI/redirect/cmdi |
 | `spider_code` | 🔬 análisis | Spider HTML/JS: secretos, creds, source maps |
-| `web_code` | 🔬 análisis | Análisis profundo: framework, Firebase, endpoints |
+| `web_code` | 🔬 análisis | Análisis profundo: framework, Firebase, endpoints, GraphQL |
 | `ing_inversa` | 🔬 ing. inversa | RE + bypass (scripts, binarios, carpetas, KeyAuth) |
 | `metasploit` | 💥 ataque | search / exploit / auxiliary / payload / scan |
-| ✨ `cred_stuff` | 💥 ataque | Prueba credenciales contra el login (bueno/malo) |
-| ✨ `model_advisor` | 🛠️ desarrollo | Recomienda qué modelo Ollama usar por tarea |
-| ✨ `code_dev` | 🛠️ desarrollo | Desarrolla código y lo entrega en `out/<proj>/dev/` |
+| `cred_stuff` | 💥 ataque | Prueba credenciales contra el login (bueno/malo) |
+| `apk_analyze` | 📱 móvil | RE estático de APK: manifest, secretos, lógica, SSL pinning |
+| `apk_dynamic` | 📱 móvil | Frida: bypass de SSL pinning + hooks de credenciales/cripto |
+| `model_advisor` | 🛠️ desarrollo | Recomienda modelo Ollama **+ prepara el toolchain** del lenguaje |
+| `code_dev` | 🛠️ desarrollo | Desarrolla código (pipenv + linters) → `out/<proj>/dev/` |
 
-<sub>✨ = nuevo</sub>
+<sub>✨ = nuevo en esta versión</sub>
 
 </div>
 
@@ -169,8 +172,10 @@ web_attack   → detecta vulns en vivo
 
 **🔑 Credenciales**
 ```text
-whiteintel   → descarga creds filtradas
-   └─ cred_stuff → dice cuál sirve
+whiteintel_num  → API WhiteIntel: creds por dominio/empresa
+   │              guarda JSON en out/<proj>/credentials/
+whiteintel      → descarga stealer logs completos
+   └─ cred_stuff → prueba cuál login funciona
 ```
 
 </td>
@@ -186,8 +191,21 @@ ing_inversa <bin|script|carpeta>
 
 **🛠️ Desarrollo**
 ```text
-model_advisor → mejor modelo
-   └─ code_dev → out/<proj>/dev/
+model_advisor → modelo + toolchain
+   └─ code_dev → out/<proj>/dev/ (pipenv)
+```
+
+</td>
+</tr>
+<tr>
+<td colspan="2" valign="top">
+
+**📱 Móvil (APK)**
+```text
+apk_analyze <app.apk>   → manifest · secretos · lógica · ¿SSL pinning?
+   └─ apk_dynamic action=ssl-unpin  → Frida bypass pinning en runtime
+        └─ apk_dynamic action=hook  → captura credenciales/cripto
+             └─ intercepta con Burp / mitmproxy
 ```
 
 </td>
@@ -255,6 +273,8 @@ out/
     ├── session_YYYYMMDD_HHMMSS.json    ← conversación completa
     ├── session_YYYYMMDD_HHMMSS.md      ← log en tiempo real
     ├── session_*_report.html           ← dark theme con gráficos
+    ├── credentials/                    ← 🔑 whiteintel_num: JSON con creds expuestas
+    │   └── whiteintel_<dominio>_<ts>.json
     └── dev/                            ← 🛠️ código generado por code_dev
 out_re/
 └── <binario>_TS/
@@ -270,6 +290,7 @@ out_re/
 hacker ❯ hackea https://ejemplo.com
 hacker ❯ enumera subdominios de banco.com y escanea con nuclei los activos
 hacker ❯ SKILL:web_attack target=https://app.ejemplo.com tests=sqli,xss,lfi
+hacker ❯ SKILL:whiteintel_num target=ejemplo.com company=EmpresaCorp
 hacker ❯ SKILL:whiteintel domain=ejemplo.com
 hacker ❯ SKILL:cred_stuff target=https://ejemplo.com/login domain=ejemplo.com
 hacker ❯ bypass el login de /home/kali/reto/vault_bin
@@ -278,6 +299,21 @@ hacker ❯ listame vulnerabilidades
 hacker ❯ explotar 3
 hacker ❯ reporte
 ```
+
+---
+
+---
+
+## 🛡️ Robustez del agente
+
+| Mecanismo | Qué resuelve |
+|:----------|:-------------|
+| **Auto-SKILL mapping** | Si el modelo genera `subfinder -d X`, `gobuster dir -u X` o `nuclei -u X` crudos, el agente los convierte automáticamente al SKILL: equivalente antes de ejecutar |
+| **Gobuster wildcard auto-retry** | Si gobuster detecta wildcard 403, reintenta solo con `--wildcard` sin que el modelo lo sepa |
+| **Nuclei path fixer** | Corrige rutas relativas (`cves/`), rutas `~/nuclei-templates/*` y flags inválidos (`-categories` → `-tags`) antes de ejecutar |
+| **JSON format enforcer** | Si el modelo devuelve markdown en vez de JSON, le reenvía el prompt con instrucción explícita de formato y continúa |
+| **Hard truncate fallback** | Si la compresión de contexto por LLM falla (timeout), descarta los mensajes más antiguos automáticamente para que el agente nunca quede bloqueado |
+| **Push-back con SKILL examples** | Cuando el modelo no emite comandos, el push-back incluye ejemplos concretos con SKILL: para el target configurado |
 
 ---
 
