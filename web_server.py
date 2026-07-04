@@ -174,7 +174,10 @@ def _process_chat_turn(
         actual_model = saved_model or model
 
         # Compose user content (include uploaded file if present)
-        user_content = user_message
+        available_keys = {k: bool(get_api_key(k)) for k in [
+            "WPSCAN_API_KEY", "SHODAN_API_KEY", "VIRUSTOTAL_API_KEY", "WHITEINTEL_API_KEY",
+        ]}
+        user_content = f"[API Keys: {json.dumps(available_keys)}]\n{user_message}"
         if uploaded_file_content:
             user_content += f"\n\n[ARCHIVO ADJUNTO]\n{uploaded_file_content[:12000]}"
 
@@ -185,23 +188,103 @@ def _process_chat_turn(
         cache = ScanCache(project_dir)
         ps    = ProjectState(project_dir)
 
+        # ── Shortcut: "dame las ips" / "ips" / "targets" ─────────────────────
+        _ips_pat = re.compile(
+            r'^(?:ips?|targets?|hosts?|c[aá]maras?|dispositivos?|'
+            r'dame\s+(?:las?\s+)?(?:ips?|hosts?|targets?|c[aá]maras?)|'
+            r'(?:lista(?:me|r)?|mostrar|mu[eé]strame)\s+(?:(?:los?|las?)\s+)?'
+            r'(?:ips?|hosts?|targets?|c[aá]maras?|dispositivos?))\s*$',
+            re.I,
+        )
+        if _ips_pat.match(user_message.strip()):
+            ip_set = []
+            seen_ips: set = set()
+            type_map: dict = {}
+            for f in ps.findings:
+                ip_m = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', f.get("value", ""))
+                if ip_m:
+                    ip = ip_m.group(0)
+                    if ip not in seen_ips:
+                        seen_ips.add(ip)
+                        ip_set.append(ip)
+                        type_map[ip] = f"{f.get('type','?')} [{f.get('severity','?')}]"
+            if ip_set:
+                rows = "\n".join(f"- **{ip}** — {type_map[ip]}" for ip in ip_set[:50])
+                reply = (
+                    f"### IPs / Hosts encontrados ({len(ip_set)} en total)\n\n"
+                    f"{rows}\n\n"
+                    f"_Fuente: project_state — {len(ps.findings)} hallazgos acumulados._"
+                )
+            else:
+                reply = (
+                    "No hay IPs/hosts en el project_state aún. "
+                    "Ejecuta primero `SKILL:shodan_query`, `SKILL:scan_red` o `SKILL:subfinder_enum`."
+                )
+            emit({"type": "message", "content": reply, "phase": "recon", "risk": "low"})
+            emit({"type": "done", "session": session_name})
+            ps.save()
+            save_session(session_name, conversation, actual_model, project_dir)
+            return
+
         emit({"type": "thinking_start"})
 
         max_iters = 12
         executed_all: set[str] = set()
         breaker    = CircuitBreaker(max_repeats=3)
 
+        _last_json_err = False  # track consecutive JSON parse errors
+        _json_err_count = 0     # abort after 3 consecutive parse errors
+
         for iteration in range(max_iters):
             # Summarize context if too large
             conversation = summarize_if_needed(actual_model, conversation)
+
+            # Ollama requires strict user/assistant alternation.
+            # If the last message is "assistant", insert a user nudge before calling.
+            if conversation and conversation[-1]["role"] == "assistant":
+                if _last_json_err:
+                    _nudge = (
+                        "⚠️ Tu respuesta anterior no era JSON válido. "
+                        "Responde ÚNICAMENTE con un objeto JSON puro, SIN bloques ```json```, "
+                        "SIN texto fuera del objeto. Ejemplo mínimo:\n"
+                        '{"thinking":"...","commands":["SKILL:..."],'
+                        '"message":"...","task_complete":false,'
+                        '"risk_level":"low","phase":"recon",'
+                        '"requires_confirmation":false,"needs_api_keys":[],'
+                        '"open_browser":"","fetch_url":""}'
+                    )
+                else:
+                    _nudge = "Continúa. Emite los comandos SKILL necesarios o marca task_complete:true."
+                conversation.append({"role": "user", "content": _nudge})
 
             # Call Ollama
             emit({"type": "status", "content": f"Consultando {actual_model}…"})
             try:
                 resp = call_ollama(actual_model, conversation)
             except Exception as e:
-                emit({"type": "error", "content": f"Error llamando a Ollama: {e}"})
-                break
+                err_str = str(e)
+                if "400" in err_str or "context" in err_str.lower():
+                    # Context overflow — truncate hard and retry once
+                    from agent import _hard_truncate as _ht
+                    conversation = _ht(conversation, target_chars=10000)
+                    emit({"type": "status", "content": "Contexto reducido, reintentando…"})
+                    try:
+                        resp = call_ollama(actual_model, conversation)
+                    except Exception as e2:
+                        emit({"type": "error", "content": f"Error llamando a Ollama: {e2}"})
+                        break
+                else:
+                    emit({"type": "error", "content": f"Error llamando a Ollama: {e}"})
+                    break
+
+            _last_json_err = bool(resp.get("_json_parse_error"))
+            if _last_json_err:
+                _json_err_count += 1
+                if _json_err_count >= 3:
+                    emit({"type": "error", "content": "El modelo no genera JSON válido tras 3 intentos. Cambia de modelo o reinicia la sesión."})
+                    break
+            else:
+                _json_err_count = 0
 
             thinking    = resp.get("thinking", "")
             message     = resp.get("message", "")
@@ -211,22 +294,22 @@ def _process_chat_turn(
             phase       = resp.get("phase", "recon")
             fetch_target = resp.get("fetch_url", "")
             open_browser = resp.get("open_browser", "")
-            req_confirm  = resp.get("requires_confirmation", False)
-
-            if thinking:
+            json_err = bool(resp.get("_json_parse_error"))
+            if thinking and not json_err:
                 emit({"type": "thinking", "content": thinking, "phase": phase, "risk": risk})
-            if message:
+            if message and not json_err:
+                # Only emit clean messages; raw markdown from parse errors is suppressed
                 emit({"type": "message", "content": message, "phase": phase, "risk": risk})
+            elif json_err:
+                emit({"type": "status", "content": "⚠️ Formato inválido — reintentando con JSON…"})
             log.thinking(thinking, phase, risk)
-            if message:
+            if message and not json_err:
                 log.message(message)
 
             if task_done and not commands:
                 break
 
-            if req_confirm and commands:
-                emit({"type": "confirm_request", "commands": commands, "risk": risk})
-                # In web mode we auto-confirm (user can manage risk via web)
+            # requires_confirmation is always auto-approved — the session wizard handles authorization
 
             # Fetch URL if requested
             fetch_result_text = ""
@@ -317,6 +400,8 @@ def _process_chat_turn(
                             emit({"type": "new_findings", "findings": skill_finds[:20]})
                         all_output.append({"skill": skill_name, "output": skill_out[:8000],
                                            "success": skill_ok, "findings": skill_finds[:30]})
+                        # Emit file_ready for skills that generate downloadable files
+                        _emit_file_ready(emit, sr, skill_name)
                     except Exception as se2:
                         emit({"type": "error", "content": f"Skill {skill_name}: {se2}"})
                     executed_all.add(cmd)
@@ -386,16 +471,66 @@ def _process_chat_turn(
             if all_nuclei:
                 result_str += f"\n{format_nuclei_findings(all_nuclei)}"
 
+            # Build pre-formatted device/host table from this turn's skill findings
+            _DEVICE_TYPES = {"device_found", "host_info", "risky_port", "cve_exposure",
+                             "exploit_available", "subdomain", "http_active"}
+            _turn_finds = []
+            for _e in all_output:
+                for _f in _e.get("findings", []):
+                    if _f.get("type") in _DEVICE_TYPES and _f.get("value"):
+                        _turn_finds.append(_f)
+            _devices_block = ""
+            if _turn_finds:
+                _rows = []
+                for _i, _f in enumerate(_turn_finds[:40], 1):
+                    _sev  = _f.get("severity", "info").upper()
+                    _val  = _f.get("value", "")
+                    _desc = _f.get("description", "")[:90]
+                    _rows.append(f"| {_i} | `{_val}` | {_sev} | {_desc} |")
+                _devices_block = (
+                    "\n\n[TABLA OBLIGATORIA — COPIAR ÍNTEGRA EN message]\n"
+                    "| # | IP / Host | Sev | Detalle |\n"
+                    "|---|-----------|-----|---------|\n"
+                    + "\n".join(_rows)
+                )
+
             conversation.append({"role": "assistant",
                                   "content": json.dumps(resp, ensure_ascii=False)})
             if task_done:
                 conversation.append({"role": "user",
-                                      "content": f"Resultado: {result_str}"})
+                                      "content": f"Resultado: {result_str}{_devices_block}"})
                 break
+            # Contexto acumulado de hallazgos para que el LLM no olvide IPs/hosts
+            ps_ctx = ""
+            if ps.findings:
+                top = ps.top_findings(30)
+                ip_set = []
+                seen_ips: set = set()
+                for f in ps.findings:
+                    ip_m = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', f.get("value", ""))
+                    if ip_m and ip_m.group(0) not in seen_ips:
+                        seen_ips.add(ip_m.group(0))
+                        ip_set.append(ip_m.group(0))
+                ps_ctx = (
+                    f"\n[PROYECTO — hallazgos acumulados: {len(ps.findings)} total]\n"
+                    + (f"IPs/hosts conocidos: {', '.join(ip_set[:20])}\n" if ip_set else "")
+                    + "Top hallazgos:\n"
+                    + "\n".join(
+                        f"  [{f.get('severity','?').upper()}] {f.get('type','?')}: {f.get('value','')[:80]}"
+                        for f in top[:15]
+                    )
+                )
+
             conversation.append({"role": "user",
                                   "content": (
                                       f"Resultados:\n{result_str}\n\n"
+                                      f"{ps_ctx}"
+                                      f"{_devices_block}\n\n"
                                       f"[YA EJECUTADOS — NO repetir]: {json.dumps(sorted(executed_all))}\n"
+                                      "IMPORTANTE: Si los resultados incluyen hosts, IPs, cámaras o "
+                                      "dispositivos, DEBES listarlos TODOS en tu message en formato tabla "
+                                      "markdown con IP, puerto, ISP y ciudad. No omitas ninguno aunque no "
+                                      "haya CVEs. IPs de Shodan son válidas aunque nmap no las alcance. "
                                       "Si tienes suficiente info, marca task_complete: true."
                                   )})
 
@@ -409,9 +544,73 @@ def _process_chat_turn(
         emit({"type": "done", "session": session_name})
 
 
+# ── Helpers para file_ready ───────────────────────────────────────────────────
+_EXT_LANG = {
+    "py": "python", "sh": "bash", "ps1": "powershell", "go": "go",
+    "c": "c", "cpp": "cpp", "rs": "rust", "rb": "ruby", "php": "php",
+    "js": "javascript", "java": "java", "cs": "csharp", "txt": "duckyscript",
+}
+
+def _emit_file_ready(emit_fn, skill_result: dict, skill_name: str):
+    """Emit a file_ready event when a skill produces a downloadable file."""
+    from pathlib import Path
+    # Gather candidate file paths from skill result keys
+    candidates = []
+    for key in ("code_file", "saved", "script_path", "report_file"):
+        val = skill_result.get(key)
+        if val:
+            candidates.append(str(val))
+    # ducky_dev also returns inline 'script' content + 'saved' path
+    inline_content = skill_result.get("script", "")
+    if not candidates and not inline_content:
+        return
+    for file_path_str in candidates:
+        try:
+            fp = Path(file_path_str)
+            if not fp.exists():
+                continue
+            content = fp.read_text(encoding="utf-8", errors="replace")
+            ext = fp.suffix.lstrip(".")
+            lang = _EXT_LANG.get(ext, ext or "text")
+            # For ducky payloads, use duckyscript highlighting hint
+            if skill_name in ("ducky_dev",) or ext == "txt":
+                lang = "duckyscript"
+            emit_fn({"type": "file_ready", "path": file_path_str,
+                     "filename": fp.name, "language": lang,
+                     "content": content, "size": len(content)})
+            return  # emit only the first valid file
+        except Exception:
+            continue
+    # Fallback: use inline content from skill result (e.g. ducky_dev 'script')
+    if inline_content and not candidates:
+        emit_fn({"type": "file_ready", "path": "", "filename": f"{skill_name}_output.txt",
+                 "language": "duckyscript" if skill_name == "ducky_dev" else "text",
+                 "content": inline_content, "size": len(inline_content)})
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # REST API routes
 # ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/download")
+def api_download():
+    """Serve a file from the out/ directory for download."""
+    from flask import request as freq, send_file, abort
+    from pathlib import Path
+    file_path = freq.args.get("path", "").strip()
+    if not file_path:
+        abort(400)
+    fp = Path(file_path)
+    # Security: only serve files within the project base dir
+    base = Path(__file__).parent.resolve()
+    try:
+        fp.resolve().relative_to(base)
+    except ValueError:
+        abort(403)
+    if not fp.exists() or not fp.is_file():
+        abort(404)
+    return send_file(str(fp.resolve()), as_attachment=True, download_name=fp.name)
+
 
 @app.route("/api/projects", methods=["GET"])
 def api_projects():
@@ -539,12 +738,24 @@ def api_chat(proj_id: str, sess_name: str):
     t.start()
 
     def generate():
+        # Poll queue in 30s slices; send keepalive comments so the browser
+        # doesn't close the SSE connection during long Ollama generations.
+        # Only give up if the background thread has died AND the queue is empty.
+        max_idle = 20  # 20 × 30s = 10 min idle max after thread dies
+        idle_ticks = 0
         while True:
             try:
-                event = eq.get(timeout=180)
+                event = eq.get(timeout=30)
+                idle_ticks = 0
             except queue.Empty:
-                yield f"data: {json.dumps({'type': 'error', 'content': 'Timeout esperando respuesta'})}\n\n"
-                break
+                if not t.is_alive():
+                    idle_ticks += 1
+                    if idle_ticks >= 2:
+                        yield f"data: {json.dumps({'type': 'error', 'content': 'El proceso terminó sin respuesta'})}\n\n"
+                        break
+                # Thread still running or just finished — send keepalive comment
+                yield ": keepalive\n\n"
+                continue
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             if event.get("type") == "done":
                 break

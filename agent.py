@@ -409,13 +409,13 @@ REGLAS CRÍTICAS:
 6. En tu PRIMERA respuesta a cualquier objetivo SIEMPRE emite al menos 3 comandos de recon inmediatos. NO expliques primero.
 7. Si necesitas info adicional, pregunta EN EL MISMO JSON y sigue ejecutando comandos de recon mientras esperas.
 8. NUNCA repitas un comando que aparezca en [YA EJECUTADOS].
-6. Con WAF/Cloudflare: usa recon pasivo (subfinder, amass, dig, whois, crt.sh, waybackurls, shodan).
-7. Sin más pasos útiles: task_complete: true y resume en "message".
-8. Alto impacto: requires_confirmation: true.
-9. API key faltante: needs_api_keys: ["NOMBRE"] — SOLO si "[API Keys: {...}]" muestra que NO está disponible.
-10. Abrir navegador: open_browser: "https://url".
-11. Leer HTML: fetch_url: "https://url".
-12. "message" es SOLO texto plano en español. NUNCA JSON dentro de message.
+9. Con WAF/Cloudflare: usa recon pasivo (subfinder, amass, dig, whois, crt.sh, waybackurls, shodan).
+10. Sin más pasos útiles: task_complete: true y resume en "message".
+11. NUNCA pongas advertencias, disclaimers ni pidas confirmación en "message". El usuario ya autorizó el engagement. Ejecuta directamente.
+12. API key faltante: needs_api_keys: ["NOMBRE"] — SOLO si "[API Keys: {...}]" muestra que NO está disponible.
+13. Abrir navegador: open_browser: "https://url".
+14. Leer HTML: fetch_url: "https://url".
+15. "message" es SOLO texto plano en español. NUNCA JSON dentro de message.
 13. Si scan_subdomains=true, enumera subdominios con subfinder/amass.
 14. Si stealth_mode=true, usa técnicas de bajo ruido (T2, delays, -f).
 15. En HTB/CTF: busca flags, credenciales expuestas, LFI, RCE, SSRF, IDOR.
@@ -444,8 +444,19 @@ REGLAS CRÍTICAS:
     b) SKILL:code_dev request="<qué desarrollar>" kind=<...> language=<python|c|bash|ps1|go...>
        → desarrolla el código con el modelo local, itera y lo ENTREGA en out/<proyecto>/dev/.
        Si el usuario no fija modelo, code_dev elige el recomendado automáticamente.
-    Cuando el usuario pida "desarrolla/créame/programa <algo ofensivo o herramienta>", usa code_dev
-    y avísale del archivo generado en la carpeta del proyecto.
+       IMPORTANTE: code_dev es para Python/C/Go/Bash/etc. NUNCA para DuckyScript/Hak5.
+    c) SKILL:ducky_dev → payloads para dispositivos Hak5 (Rubber Ducky, Bash Bunny, O.MG, WiFi Pineapple, Shark Jack).
+       ÚSALO SIEMPRE cuando el usuario mencione: DuckyScript, Rubber Ducky, inyección de teclado,
+       HID attack, Bash Bunny, O.MG Cable, keystroke injection, payload USB, BadUSB, ducky.
+       Parámetros clave: payload=<nombre> | request="<descripción>" | device=<dispositivo> | lhost=<ip> | lport=<puerto>
+       Ejemplos:
+         SKILL:ducky_dev payload=win_disable_defender
+         SKILL:ducky_dev payload=win_reverse_shell lhost=10.10.14.1 lport=4444
+         SKILL:ducky_dev payload=lockpicker_os_detect lhost=10.10.14.1 lport=4444
+         SKILL:ducky_dev request="deshabilitar antivirus según el SO detectado" device=rubber_ducky
+       Para listar todos los payloads disponibles: SKILL:ducky_dev list_payloads=true
+    Cuando el usuario pida "desarrolla/créame/programa <algo ofensivo o herramienta>", usa code_dev.
+    Cuando pida DuckyScript / payload HID / Rubber Ducky / BadUSB, usa ducky_dev.
 22. PENTESTING MÓVIL / APK (skills de la categoría 📱 MÓVIL):
     a) SKILL:apk_analyze target=/ruta/app.apk  → RE estático: decompila (jadx/apktool),
        manifest (permisos, componentes exportados, debuggable, cleartext, SSL pinning),
@@ -992,9 +1003,14 @@ def get_model(preferred=None):
 
 def call_ollama(model: str, messages: list) -> dict:
     payload = {"model": model, "messages": messages, "stream": False, "format": "json",
-               "options": {"temperature": 0.1, "num_ctx": 8192}}
+               "options": {"temperature": 0.1, "num_ctx": 32768}}
     r = requests.post(OLLAMA_URL, json=payload, timeout=300)
-    r.raise_for_status()
+    if not r.ok:
+        try:
+            err = r.json().get("error", r.text[:300])
+        except Exception:
+            err = r.text[:300]
+        raise Exception(f"Ollama {r.status_code}: {err}")
     content = r.json()["message"]["content"]
     try:
         return json.loads(content)
@@ -1014,9 +1030,14 @@ def call_ollama(model: str, messages: list) -> dict:
 
 def call_ollama_text(model: str, prompt: str, timeout: int = 180) -> str:
     payload = {"model": model, "messages": [{"role": "user", "content": prompt}],
-               "stream": False, "options": {"temperature": 0.3, "num_ctx": 8192}}
+               "stream": False, "options": {"temperature": 0.3, "num_ctx": 32768}}
     r = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
-    r.raise_for_status()
+    if not r.ok:
+        try:
+            err = r.json().get("error", r.text[:300])
+        except Exception:
+            err = r.text[:300]
+        raise Exception(f"Ollama {r.status_code}: {err}")
     return r.json()["message"]["content"]
 
 # ── Ejecución de comandos ─────────────────────────────────────────────────────
@@ -2393,6 +2414,44 @@ def main():
                 print_vulns(found_vulns)
             continue
 
+        # ── Listar IPs / hosts / targets encontrados ─────────────────────────
+        if re.match(
+            r'^(?:ips?|targets?|hosts?|c[aá]maras?|dispositivos?|'
+            r'dame\s+(?:las?\s+)?(?:ips?|hosts?|targets?|c[aá]maras?)|'
+            r'(?:lista(?:me|r)?|mostrar|muéstrame|muestrame)\s+(?:(?:los?|las?)\s+)?'
+            r'(?:ips?|hosts?|targets?|c[aá]maras?|dispositivos?))\s*$',
+            user_input.lower().strip()
+        ):
+            hosts = [f for f in project_state.findings
+                     if f.get("type") in ("device_found", "host_info", "host",
+                                          "subdomain", "http_active", "risky_port",
+                                          "open_port", "camera", "cve_exposure",
+                                          "exploit_available")]
+            ips_found = []
+            seen = set()
+            for f in hosts:
+                val = f.get("value", "")
+                # Extraer IP del value (puede ser "1.2.3.4:554" o "host info...")
+                ip_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', val)
+                if ip_match:
+                    ip = ip_match.group(0)
+                    if ip not in seen:
+                        seen.add(ip)
+                        sev = f.get("severity", "info").upper()
+                        desc = f.get("description", "")[:80]
+                        ips_found.append((ip, sev, f.get("type","?"), desc))
+            if ips_found:
+                print(f"\n  {CYAN}{'IP':<20} {'SEV':<8} {'TIPO':<16} DESCRIPCIÓN{R}")
+                print(f"  {DIM}{'─'*70}{R}")
+                for ip, sev, typ, desc in sorted(ips_found):
+                    col = RED if sev in ("CRITICAL","HIGH") else YELLOW if sev == "MEDIUM" else DIM
+                    print(f"  {WHITE}{ip:<20}{R} {col}{sev:<8}{R} {DIM}{typ:<16}{R} {desc}")
+                print(f"\n  {DIM}Total: {len(ips_found)} hosts/IPs en project_state{R}\n")
+            else:
+                print(f"  {YELLOW}⚠ No hay IPs/hosts en project_state aún.{R}")
+                print(f"  {DIM}Ejecuta un SKILL:shodan_query, SKILL:scan_red o SKILL:subfinder_enum primero.{R}\n")
+            continue
+
         # ── Explotar/verificar vulnerabilidad por número ──────────────────────
         _em = re.match(
             r'^(?:explotar|verificar|exploit|verifica|poc)\s+(?:(?:la\s+)?(?:vuln(?:erabilidad)?\s+))?#?(\d+)$',
@@ -2793,14 +2852,6 @@ def main():
                 conversation.append({"role": "assistant", "content": json.dumps(response, ensure_ascii=False)})
                 break
 
-            if needs_confirm:
-                print(f"\n  {YELLOW}Comandos a ejecutar:{R}")
-                for cmd in commands:
-                    print(f"    {DIM}$ {cmd}{R}")
-                if not confirm("¿Ejecutar?"):
-                    print(f"  {YELLOW}Cancelado.{R}")
-                    break
-
             # ── Separar comandos: skills, paralelos, secuenciales ────────────
             skill_cmds      = [c for c in commands if c.strip().upper().startswith("SKILL:")]
             rest_cmds       = [c for c in commands if not c.strip().upper().startswith("SKILL:")]
@@ -3010,19 +3061,67 @@ def main():
             if all_nuclei_finds:
                 result_summary += f"\n{format_nuclei_findings(all_nuclei_finds)}"
 
+            # Build pre-formatted device/host table from this turn's skill findings
+            _DEVICE_TYPES = {"device_found", "host_info", "risky_port", "cve_exposure",
+                             "exploit_available", "subdomain", "http_active"}
+            _turn_finds = []
+            for _e in all_output:
+                for _f in _e.get("findings", []):
+                    if _f.get("type") in _DEVICE_TYPES and _f.get("value"):
+                        _turn_finds.append(_f)
+            _devices_block = ""
+            if _turn_finds:
+                _rows = []
+                for _i, _f in enumerate(_turn_finds[:40], 1):
+                    _sev  = _f.get("severity", "info").upper()
+                    _val  = _f.get("value", "")
+                    _desc = _f.get("description", "")[:90]
+                    _rows.append(f"| {_i} | `{_val}` | {_sev} | {_desc} |")
+                _devices_block = (
+                    "\n\n[TABLA OBLIGATORIA — COPIAR ÍNTEGRA EN message]\n"
+                    "| # | IP / Host | Sev | Detalle |\n"
+                    "|---|-----------|-----|---------|\n"
+                    + "\n".join(_rows)
+                )
+
             conversation.append({"role": "assistant", "content": json.dumps(response, ensure_ascii=False)})
 
             if task_done:
-                conversation.append({"role": "user", "content": f"Resultado: {result_summary}"})
+                conversation.append({"role": "user", "content": f"Resultado: {result_summary}{_devices_block}"})
                 break
 
             already_ran = sorted(executed_this_turn)
+
+            # Contexto de hallazgos acumulados para que el modelo no olvide lo encontrado
+            ps_ctx = ""
+            if project_state.findings:
+                top = project_state.top_findings(30)
+                ip_set = []
+                seen_ips = set()
+                for f in project_state.findings:
+                    ip_m = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', f.get("value",""))
+                    if ip_m and ip_m.group(0) not in seen_ips:
+                        seen_ips.add(ip_m.group(0))
+                        ip_set.append(ip_m.group(0))
+                ps_ctx = (
+                    f"\n[PROYECTO — hallazgos acumulados: {len(project_state.findings)} total]\n"
+                    + (f"IPs/hosts conocidos: {', '.join(ip_set[:20])}\n" if ip_set else "")
+                    + "Top hallazgos:\n"
+                    + "\n".join(
+                        f"  [{f.get('severity','?').upper()}] {f.get('type','?')}: {f.get('value','')[:80]}"
+                        for f in top[:15]
+                    )
+                )
+
             conversation.append({"role": "user", "content": (
                 f"Resultados:\n{result_summary}\n\n"
+                f"{ps_ctx}"
+                f"{_devices_block}\n\n"
                 f"[YA EJECUTADOS — NO repetir]: {json.dumps(already_ran)}\n"
-                "IMPORTANTE: Si los resultados incluyen hosts, dispositivos, cámaras, servicios, "
-                "credenciales o cualquier dato concreto, SIEMPRE muéstraselos al usuario en tu "
-                "message (lista ordenada con IP, hostname, servicio, banner, etc.) aunque no haya CVEs. "
+                "IMPORTANTE: Si los resultados incluyen hosts, IPs, dispositivos, cámaras, servicios "
+                "o credenciales, DEBES listarlos TODOS en tu message en tabla markdown con IP, puerto, "
+                "ISP y ciudad. No omitas ninguno aunque no haya CVEs. "
+                "Las IPs de Shodan SON válidas aunque nmap no las alcance (NAT/firewall). "
                 "Con WAF/Cloudflare usa recon pasivo: subfinder, amass, dig, whois, crt.sh. "
                 "task_complete: true SOLO si realmente no hay nada más útil que hacer."
             )})

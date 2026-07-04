@@ -504,6 +504,41 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
 }
 .skill-toggle-btn:hover{background:var(--bg5);color:var(--text3);}
 
+/* ── File ready block ────────────────────── */
+.file-ready-block{
+  margin:10px 0 10px 44px;border:1px solid var(--border2);border-radius:var(--r);
+  overflow:hidden;background:var(--bg2);
+}
+.file-header{
+  display:flex;align-items:center;gap:8px;padding:8px 12px;
+  background:var(--bg3);border-bottom:1px solid var(--border);flex-wrap:wrap;
+}
+.file-icon{font-size:15px;}
+.file-name{font-size:12px;font-weight:600;color:var(--text);font-family:'JetBrains Mono',monospace;}
+.file-meta{font-size:10px;color:var(--text3);margin-left:4px;}
+.file-actions{display:flex;gap:6px;margin-left:auto;align-items:center;}
+.file-copy-btn{
+  background:var(--bg4);border:1px solid var(--border2);color:var(--text2);
+  font-size:11px;padding:3px 10px;border-radius:var(--r-sm);cursor:pointer;
+  transition:var(--tr);white-space:nowrap;
+}
+.file-copy-btn:hover{background:var(--accent-low);border-color:var(--accent);color:var(--accent2);}
+.file-dl-btn{
+  background:var(--green-low);border:1px solid var(--green);color:var(--green);
+  font-size:11px;padding:3px 10px;border-radius:var(--r-sm);cursor:pointer;
+  text-decoration:none;transition:var(--tr);white-space:nowrap;display:inline-flex;align-items:center;gap:4px;
+}
+.file-dl-btn:hover{background:var(--green);color:#fff;}
+.file-code-wrap{
+  max-height:420px;overflow-y:auto;overflow-x:auto;
+}
+.file-code-wrap pre{
+  margin:0;padding:14px 16px;font-size:12px;
+  font-family:'JetBrains Mono',monospace;line-height:1.6;
+  background:transparent;white-space:pre;
+}
+.file-code-wrap code{background:transparent;padding:0;font-family:inherit;}
+
 /* ── Status pulse ────────────────────────── */
 .scan-status{
   display:flex;align-items:center;gap:8px;font-size:11px;color:var(--accent2);
@@ -1239,6 +1274,22 @@ const S={
 window.onload=async()=>{
   await Promise.all([loadProjects(),loadModels(),checkOllama()]);
   setInterval(checkOllama,14000);
+  // Auto-restore last session
+  try{
+    const last=JSON.parse(localStorage.getItem('ha_last_session')||'null');
+    if(last&&last.projId&&last.sessName){
+      const proj=S.projects.find(p=>p.id===last.projId);
+      const sess=(proj?.sessions||[]).find(s=>s.name===last.sessName);
+      if(proj&&sess){
+        document.getElementById('chat-messages').innerHTML=
+          `<div id="restore-notice" style="text-align:center;padding:30px 20px;color:var(--text3);font-size:13px;">
+            <div style="font-size:22px;margin-bottom:8px;">⏳</div>
+            Restaurando sesión <b>${esc(sess.name)}</b>…
+          </div>`;
+        await selectSess(last.projId,last.sessName);
+      }
+    }
+  }catch{}
 };
 
 /* ── Ollama status ── */
@@ -1314,6 +1365,7 @@ function toggleProj(id){document.getElementById(`proj-${id}`)?.classList.toggle(
 async function selectSess(projId,sessName){
   const proj=S.projects.find(p=>p.id===projId);if(!proj)return;
   S.proj=proj;S.sess=sessName;
+  try{localStorage.setItem('ha_last_session',JSON.stringify({projId,sessName}));}catch{}
   S.projType=proj.project_type||'full';
   document.getElementById('ctx-proj').textContent=proj.name;
   document.getElementById('ctx-sess').textContent=sessName;
@@ -1467,6 +1519,42 @@ function appendSkillBlock(name,output,success,findings,running=false){
   chat.appendChild(div);autoScroll();
 }
 
+function appendFileBlock(filename, content, language, filePath){
+  const chat=document.getElementById('chat-messages');
+  const div=document.createElement('div');
+  div.className='file-ready-block';
+  const fid='fr'+Date.now()+'_'+(Math.random()*9999|0);
+  const ext=filename.split('.').pop()||'txt';
+  const langLabel=language||ext;
+  const lineCount=(content.match(/\n/g)||[]).length+1;
+  const sizeLabel=content.length>1024?`${(content.length/1024).toFixed(1)}KB`:`${content.length}B`;
+  const dlBtn=filePath?
+    `<a class="file-dl-btn" href="/api/download?path=${encodeURIComponent(filePath)}" download="${esc(filename)}" title="Descargar">⬇ Descargar</a>`:'';
+  div.innerHTML=`
+    <div class="file-header">
+      <span class="file-icon">📄</span>
+      <span class="file-name">${esc(filename)}</span>
+      <span class="file-meta">${esc(langLabel)} · ${lineCount} líneas · ${sizeLabel}</span>
+      <div class="file-actions">
+        <button class="file-copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('${fid}_code').textContent).then(()=>toast('Copiado','success'))" title="Copiar código">⎘ Copiar</button>
+        ${dlBtn}
+      </div>
+    </div>
+    <div class="file-code-wrap">
+      <pre><code id="${fid}_code" class="language-${esc(langLabel)}">${esc(content)}</code></pre>
+    </div>`;
+  chat.appendChild(div);
+  // Syntax highlight if hljs is available
+  try{
+    const codeEl=div.querySelector('code');
+    if(window.hljs){
+      const res=hljs.highlightAuto(content,[langLabel,'bash','powershell','python','javascript','plaintext']);
+      codeEl.innerHTML=res.value;
+    }
+  }catch(e){}
+  autoScroll();
+}
+
 function appendTyping(){
   const chat=document.getElementById('chat-messages');
   const div=document.createElement('div');div.id='typing-ind';div.className='typing-row';
@@ -1607,6 +1695,10 @@ function handleSSE(ev){
       appendSkillBlock(ev.skill,ev.output,ev.success,ev.findings||[]);
       if(ev.findings?.length){S.findings.push(...ev.findings);renderFindingCounts();}
       appendTyping();autoScroll();break;
+    case 'file_ready':
+      removeTyping();
+      appendFileBlock(ev.filename||'output.txt',ev.content||'',ev.language||'text',ev.path||'');
+      appendTyping();autoScroll();break;
     case 'new_findings':
       S.findings.push(...(ev.findings||[]));renderFindingCounts();break;
     case 'fetch_done':
@@ -1635,6 +1727,31 @@ function handleSSE(ev){
 /* ═══════════════════════════════════════════
    CHAT HISTORY
 ═══════════════════════════════════════════ */
+
+/* Strip [API Keys: {...}] prefix the server prepends to every user turn */
+function _stripApiKeys(content){
+  if(!content||!content.startsWith('[API Keys:'))return content;
+  const nl=content.indexOf('\n');
+  return nl===-1?'':content.slice(nl+1);
+}
+
+/* Returns true for server-injected internal messages that should not appear in the chat */
+function _isSystemMsg(content){
+  const c=content||'';
+  return c.startsWith('[CONTEXTO TRUNCADO')||
+         c.startsWith('[RESUMEN COMPRIMIDO')||
+         c.startsWith('[BUCLE DETECTADO')||
+         c.startsWith('[FORZADO]')||
+         c.startsWith('[YA EJECUTADOS')||
+         c.startsWith('[PROYECTO —')||
+         c.startsWith('[TABLA OBLIGATORIA')||
+         c.startsWith('Keys disponibles:')||
+         c.startsWith('DEBES emitir')||
+         c.startsWith('Resultado: ')||   // task_done raw JSON, NOT "Resultados:"
+         c.startsWith('[Directorio:')||
+         (c.startsWith('[API Keys:')&&c.indexOf('\n')===-1); // orphan prefix line
+}
+
 /* Parse "Resultados:\n[...]" messages injected by agent.py */
 function _parseResultsMsg(content){
   if(!content||!content.startsWith('Resultados:\n'))return null;
@@ -1655,8 +1772,11 @@ async function loadHistory(projId,sessName){
     chat.innerHTML='';S._atBottom=true;
     const msgs=d.messages||[];
     for(const msg of msgs){
+      if(msg.role==='system')continue;
       if(msg.role==='user'){
-        const items=_parseResultsMsg(msg.content);
+        const stripped=_stripApiKeys(msg.content);
+        if(_isSystemMsg(stripped))continue;
+        const items=_parseResultsMsg(stripped);
         if(items){
           // Render skill/command results as blocks instead of raw user bubbles
           for(const it of items){
@@ -1672,8 +1792,8 @@ async function loadHistory(projId,sessName){
               appendCmdBlock(cmd,it.stdout||'',it.stderr||'',it.returncode??0,false);
             }
           }
-        } else {
-          appendUserMsg(msg.content,false);
+        } else if(stripped.trim()){
+          appendUserMsg(stripped,false);
         }
       } else if(msg.role==='assistant'){
         try{
