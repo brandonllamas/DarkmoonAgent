@@ -603,10 +603,11 @@ class ProjectState:
 
     _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
-    def __init__(self, target_dir: Path, project_name: str = "", target: str = ""):
+    def __init__(self, target_dir: Path, project_name: str = "", target: str = "", project_type: str = ""):
         self.path         = target_dir / "project_state.json"
         self.project_name = project_name
         self.target       = target
+        self.project_type = project_type
         self.domains: set = set()
         self.findings: list = []
         self._load()
@@ -617,6 +618,7 @@ class ProjectState:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
                 self.project_name = self.project_name or data.get("project_name", "")
                 self.target       = self.target or data.get("target", "")
+                self.project_type = self.project_type or data.get("project_type", "")
                 self.domains      = set(data.get("domains", []))
                 self.findings     = data.get("findings", [])
             except Exception:
@@ -630,6 +632,7 @@ class ProjectState:
         data = {
             "project_name": self.project_name,
             "target":       self.target,
+            "project_type": self.project_type,
             "updated_at":   datetime.now().isoformat(),
             "domains":      sorted(self.domains),
             "sev_summary":  sev_counts,
@@ -2218,8 +2221,8 @@ def main():
                         help="Lanzar interfaz web (Flask) en lugar del chat de terminal")
     parser.add_argument("--port",          type=int, default=7860,
                         help="Puerto para la interfaz web (default: 7860)")
-    parser.add_argument("--host",          default="127.0.0.1",
-                        help="Host para la interfaz web (default: 127.0.0.1)")
+    parser.add_argument("--host",          default="0.0.0.0",
+                        help="Host para la interfaz web (default: 0.0.0.0)")
     args = parser.parse_args()
 
     # ── Dispatch web mode ──────────────────────────────────────────────
@@ -3017,8 +3020,11 @@ def main():
             conversation.append({"role": "user", "content": (
                 f"Resultados:\n{result_summary}\n\n"
                 f"[YA EJECUTADOS — NO repetir]: {json.dumps(already_ran)}\n"
+                "IMPORTANTE: Si los resultados incluyen hosts, dispositivos, cámaras, servicios, "
+                "credenciales o cualquier dato concreto, SIEMPRE muéstraselos al usuario en tu "
+                "message (lista ordenada con IP, hostname, servicio, banner, etc.) aunque no haya CVEs. "
                 "Con WAF/Cloudflare usa recon pasivo: subfinder, amass, dig, whois, crt.sh. "
-                "Si tienes suficiente info, marca task_complete: true."
+                "task_complete: true SOLO si realmente no hay nada más útil que hacer."
             )})
             print()
 

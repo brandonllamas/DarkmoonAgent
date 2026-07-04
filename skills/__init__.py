@@ -12,6 +12,7 @@ _SKILLS: dict = {}
 CATEGORY_LABELS = {
     "recon_pasivo": "🔍 RECONOCIMIENTO PASIVO",
     "recon_activo": "⚡ RECONOCIMIENTO ACTIVO",
+    "osint":        "🕵  OSINT / INTELIGENCIA",
     "vuln_scan":    "🎯 ESCANEO DE VULNERABILIDADES",
     "analisis":     "🔬 ANÁLISIS DE CÓDIGO / CONTENIDO",
     "ing_inversa":  "🔬 INGENIERÍA INVERSA",
@@ -22,7 +23,7 @@ CATEGORY_LABELS = {
 }
 
 CATEGORY_ORDER = [
-    "recon_pasivo", "recon_activo", "vuln_scan",
+    "recon_pasivo", "recon_activo", "osint", "vuln_scan",
     "analisis", "ing_inversa", "ataque", "movil", "desarrollo", "otros",
 ]
 

