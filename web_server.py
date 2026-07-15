@@ -156,6 +156,7 @@ from agent import (
     is_parallel_safe,
     run_skill as _run_skill,
     get_model, get_model_auto, get_model_lmstudio,
+    _SUBDOMAIN_TRIGGER, _PENTEST_TRIGGER,
 )
 
 app = Flask(__name__)
@@ -336,6 +337,74 @@ def _process_chat_turn(
             emit({"type": "message", "content": reply, "phase": "recon", "risk": "low"})
             emit({"type": "done", "session": session_name})
             ps.save()
+            save_session(session_name, conversation, actual_model, project_dir)
+            return
+
+        # ── Subdominios: detecta "subdominios de dominio.com" ──────────────────
+        sub_match = _SUBDOMAIN_TRIGGER.search(user_message)
+        if sub_match:
+            sub_domain = sub_match.group(1).strip().rstrip(".")
+            emit({"type": "status", "content": f"🔍 Enumerando subdominios de {sub_domain}…"})
+            emit({"type": "thinking_start"})
+
+            all_subs: set[str] = set()
+            sources_stats: list[str] = []
+            http_active: list[str] = []
+
+            # CRT.SH (100% pasivo)
+            crtsh_r = _run_skill("crtsh_enum", domain=sub_domain)
+            if crtsh_r.get("success"):
+                crt_names = {f["value"] for f in crtsh_r.get("findings", [])}
+                all_subs.update(crt_names)
+                sources_stats.append(f"CRT.SH: {len(crt_names)}")
+                for f in crtsh_r.get("findings", []):
+                    ps.add_finding(f)
+
+            # Subfinder + httpx
+            subf_r = _run_skill("subfinder_enum", domain=sub_domain, verify_http="true")
+            if subf_r.get("success"):
+                subf_names = {f["value"] for f in subf_r.get("findings", []) if f["type"] == "subdomain"}
+                all_subs.update(subf_names)
+                sources_stats.append(f"Subfinder: {len(subf_names)}")
+                for f in subf_r.get("findings", []):
+                    ps.add_finding(f)
+                    if f["type"] == "http_active":
+                        http_active.append(f["value"])
+
+            # HackerTarget (gratis, similar a DNSDumpster)
+            try:
+                import subprocess as _sp
+                ht_r = _sp.run(
+                    ["curl", "-s", "--max-time", "15",
+                     f"https://api.hackertarget.com/hostsearch/?q={sub_domain}"],
+                    capture_output=True, text=True, timeout=20,
+                )
+                ht_out = ht_r.stdout.strip()
+                if ht_out and not ht_out.startswith("error") and "," in ht_out:
+                    ht_lines = [l.split(",")[0].strip() for l in ht_out.splitlines() if l.strip() and "," in l]
+                    all_subs.update(ht_lines)
+                    sources_stats.append(f"HackerTarget: {len(ht_lines)}")
+                    for h in ht_lines:
+                        ps.add_finding({"type": "subdomain", "value": h, "severity": "info"})
+            except Exception:
+                pass
+
+            ps.save()
+
+            # ── Unificar y mostrar ─────────────────────────────────────────
+            sorted_subs = sorted(all_subs)
+            source_line = " + ".join(sources_stats)
+            body = "\n".join(f"- `{s}`" for s in sorted_subs)
+            if http_active:
+                body += "\n\n**🌐 Responden HTTP:**\n" + "\n".join(f"- `{h}`" for h in http_active[:20])
+
+            summary = (
+                f"### 🔍 Subdominios de `{sub_domain}`\n\n"
+                f"**{len(sorted_subs)} únicos** ({source_line})\n\n"
+                f"{body}"
+            )
+            emit({"type": "message", "content": summary, "phase": "recon", "risk": "info"})
+            emit({"type": "done", "session": session_name})
             save_session(session_name, conversation, actual_model, project_dir)
             return
 

@@ -2294,7 +2294,14 @@ def generate_html_report(model: str, session_name: str, log: LogWriter,
 
 # ── Fases de pentest automáticas (sin LLM) ───────────────────────────────────
 _PENTEST_TRIGGER = re.compile(
-    r'\b(?:hackea|escanea|pentest(?:ea)?|audita|analiza|ataca|testea)\b.{0,60}?(https?://\S+|[\w.-]+\.\w{2,6})',
+    r'\b(?:hackea|escanea|pentest(?:ea)?|audita|analiza|ataca|testea|buscame|busca|encuentra|'
+    r'subdominios?|subdomains?|dorks?|reconocimiento|recon)\b.{0,60}?(https?://\S+|[\w.-]+\.\w{2,6})',
+    re.IGNORECASE
+)
+
+# ── Trigger específico para subdominios (solo enumera, no pentest completo) ──
+_SUBDOMAIN_TRIGGER = re.compile(
+    r'\b(?:subdominio|subdominios|subdomain|subdomains)\b.{0,40}?(?:de\s+)?([\w.-]+\.[a-z]{2,20})',
     re.IGNORECASE
 )
 
@@ -2598,6 +2605,8 @@ def main():
 
     # ── Loop principal ────────────────────────────────────────────────────────
     while True:
+        sub_match = None
+        pt_match = None
         try:
             user_input = input(f"{RED}{BOLD}hacker ❯ {R}").strip()
         except (EOFError, KeyboardInterrupt):
@@ -3044,8 +3053,85 @@ def main():
             )
             # cae al bloque del modelo (sin continue)
 
+        # ── Subdominios: detecta "subdominios de dominio.com" ──────────────────
+        sub_match = _SUBDOMAIN_TRIGGER.search(user_input) if not _re_match else None
+        if sub_match and _SKILLS_AVAILABLE:
+            sub_domain = sub_match.group(1).strip().rstrip(".")
+            print(f"\n  {MAGENTA}{BOLD}▶ Enumerando subdominios → {sub_domain}{R}")
+            log.separator()
+            log.user_input(user_input)
+
+            all_subs: set[str] = set()
+            sources_stats: list[str] = []
+            http_active: list[str] = []
+
+            # CRT.SH (100% pasivo, sin API key)
+            crtsh_r = run_skill("crtsh_enum", domain=sub_domain)
+            if crtsh_r.get("success"):
+                crt_names = {f["value"] for f in crtsh_r.get("findings", [])}
+                all_subs.update(crt_names)
+                sources_stats.append(f"CRT.SH:{len(crt_names)}")
+                for f in crtsh_r.get("findings", []):
+                    project_state.add_finding(f)
+
+            # Subfinder + httpx
+            subf_r = run_skill("subfinder_enum", domain=sub_domain, verify_http="true")
+            if subf_r.get("success"):
+                subf_names = {f["value"] for f in subf_r.get("findings", []) if f["type"] == "subdomain"}
+                all_subs.update(subf_names)
+                sources_stats.append(f"Subfinder:{len(subf_names)}")
+                for f in subf_r.get("findings", []):
+                    project_state.add_finding(f)
+                    if f["type"] == "http_active":
+                        http_active.append(f["value"])
+
+            # HackerTarget (DNS lookup gratuito, similar a dnsdumpster.com)
+            try:
+                ht_r = subprocess.run(
+                    ["curl", "-s", "--max-time", "15",
+                     f"https://api.hackertarget.com/hostsearch/?q={sub_domain}"],
+                    capture_output=True, text=True, timeout=20,
+                )
+                ht_out = ht_r.stdout.strip()
+                if ht_out and not ht_out.startswith("error") and "," in ht_out:
+                    ht_lines = [l.split(",")[0].strip() for l in ht_out.splitlines() if l.strip() and "," in l]
+                    all_subs.update(ht_lines)
+                    sources_stats.append(f"HackerTarget:{len(ht_lines)}")
+                    for h in ht_lines:
+                        project_state.add_finding({"type": "subdomain", "value": h, "severity": "info"})
+            except Exception:
+                pass  # HackerTarget no crítico
+
+            project_state.save()
+
+            # ── Unificar ───────────────────────────────────────────────────
+            sorted_subs = sorted(all_subs)
+            source_line = " + ".join(sources_stats)
+            body = "\n".join(f"  {s}" for s in sorted_subs)
+            if http_active:
+                body += "\n\n  🌐 Responden HTTP:\n" + "\n".join(f"  {h}" for h in http_active[:20])
+
+            summary = (
+                f"Subdominios de {sub_domain}: {len(sorted_subs)} únicos ({source_line})\n\n{body}"
+            )
+            print(f"\n{GREEN}{summary}{R}")
+
+            # Pasar al LLM para que continúe si quiere
+            user_input = (
+                f"[SUB-DOMINIOS ENCONTRADOS PARA {sub_domain}]\n{summary[:6000]}\n\n"
+                f"El usuario pidió: {user_input}\n"
+                f"Ya se ejecutó crtsh_enum y subfinder_enum. "
+                f"Si el usuario quiere más (Google dorks, nuclei, scan de puertos), "
+                f"emite los comandos correspondientes. Si no, responde con el resumen."
+            )
+            pt_match = None  # Evitar que el auto-pentest también se dispare
+            # Continuar al bloque del modelo
+
+        # ── Auto-pentest: detecta "hackea / escanea / pentest <url>" ───────────
+        pt_match = _PENTEST_TRIGGER.search(user_input) if not _re_match else None
+
         # ── Auto-optimización antes de cada instrucción ────────────────────
-        if _SKILLS_AVAILABLE and not pt_match and not _re_match:
+        if _SKILLS_AVAILABLE and not pt_match and not _re_match and not sub_match:
             try:
                 _opt_cfg = session_config or {}
                 if _opt_cfg.get("auto_optimize", True):
@@ -3055,8 +3141,6 @@ def main():
             except Exception:
                 pass  # No crítico
 
-        # ── Auto-pentest: detecta "hackea / escanea / pentest <url>" ───────────
-        pt_match = _PENTEST_TRIGGER.search(user_input) if not _re_match else None
         if pt_match:
             pt_target = pt_match.group(1)
             if not pt_target.startswith("http"):
