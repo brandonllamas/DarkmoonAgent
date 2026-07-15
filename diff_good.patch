@@ -1,0 +1,681 @@
+diff --git a/page/index.html b/page/index.html
+index ad9fc88..5aa820f 100644
+--- a/page/index.html
++++ b/page/index.html
+@@ -461,11 +461,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+ }
+ .cmd-toggle-btn:hover{background:var(--bg5);color:var(--text3);}
+ .cmd-out{max-height:0;overflow:hidden;transition:max-height .3s ease;}
+-.cmd-out.open{max-height:280px;}
++.cmd-out.open{max-height:1000px;}
+ .cmd-out pre{
+   padding:10px 12px;font-size:11px;font-family:'JetBrains Mono',monospace;
+   color:var(--text3);white-space:pre-wrap;word-break:break-all;
+-  max-height:268px;overflow-y:auto;line-height:1.5;
++  max-height:450px;overflow-y:auto;line-height:1.5;
+ }
+ 
+ /* ÔöÇÔöÇ Skill block ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ */
+@@ -491,12 +491,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+   padding:2px 8px;border-radius:12px;font-family:'JetBrains Mono',monospace;
+   font-weight:600;border:1px solid rgba(61,186,111,.2);
+ }
+-.skill-out{max-height:0;overflow:hidden;transition:max-height .3s ease;}
+-.skill-out.open{max-height:240px;}
++.skill-out{max-height:0;overflow:hidden;transition:max-height .35s ease;}
++.skill-out.open{max-height:1000px;}
+ .skill-out pre{
+   padding:10px 12px;font-size:11px;font-family:'JetBrains Mono',monospace;
+   color:var(--text3);white-space:pre-wrap;word-break:break-all;
+-  max-height:228px;overflow-y:auto;line-height:1.5;
++  max-height:580px;overflow-y:auto;line-height:1.5;
+ }
+ .skill-toggle-btn{
+   background:none;border:none;color:var(--text4);cursor:pointer;
+@@ -504,6 +504,21 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+ }
+ .skill-toggle-btn:hover{background:var(--bg5);color:var(--text3);}
+ 
++/* ÔöÇÔöÇ Return info (output size badge on commands) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ */
++.cmd-ret-info{
++  font-size:9.5px;color:var(--accent2);
++  background:rgba(123,108,246,.1);border:1px solid rgba(123,108,246,.2);
++  border-radius:4px;padding:1px 7px;font-family:'JetBrains Mono',monospace;
++  white-space:nowrap;flex-shrink:0;
++}
++/* ÔöÇÔöÇ Skill return banner ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ */
++.skill-ret-banner{
++  padding:5px 12px;font-size:11px;color:var(--green);
++  background:rgba(61,186,111,.06);border-top:1px solid rgba(61,186,111,.15);
++  font-family:'JetBrains Mono',monospace;letter-spacing:.1px;
++}
++.skill-ret-banner strong{color:var(--text2);}
++
+ /* ÔöÇÔöÇ File ready block ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ */
+ .file-ready-block{
+   margin:10px 0 10px 44px;border:1px solid var(--border2);border-radius:var(--r);
+@@ -981,6 +996,46 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+ @media(prefers-reduced-motion:reduce){
+   *{animation-duration:.01ms!important;transition-duration:.01ms!important;}
+ }
++
++
++/* ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ TOOLS TAB ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ */
++.tool-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px;display:flex;align-items:center;gap:12px;transition:var(--tr);}
++.tool-card:hover{border-color:var(--border2);background:var(--bg3);}
++.tool-card .tc-icon{font-size:18px;width:32px;text-align:center;}
++.tool-card .tc-info{flex:1;min-width:0;}
++.tool-card .tc-name{font-weight:600;font-size:13px;color:var(--text);}
++.tool-card .tc-cat{font-size:10px;color:var(--text4);margin-top:1px;}
++.tool-card .tc-status{display:flex;align-items:center;gap:6px;}
++.tool-card .tc-status .dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
++.tool-card .tc-status .dot.ok{background:var(--green);box-shadow:0 0 6px rgba(61,186,111,.4);}
++.tool-card .tc-status .dot.missing{background:var(--red);box-shadow:0 0 6px rgba(224,82,82,.4);}
++.tool-card .tc-install-btn{background:var(--bg4);border:1px solid var(--border);color:var(--text2);border-radius:var(--r-sm);padding:6px 12px;font-size:11px;cursor:pointer;transition:var(--tr);white-space:nowrap;}
++.tool-card .tc-install-btn:hover{background:var(--accent-low);border-color:var(--accent);color:var(--accent2);}
++.tool-card .tc-install-btn:disabled{opacity:.4;cursor:not-allowed;}
++.tool-action-btn{background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--r);padding:8px 16px;font-size:12px;cursor:pointer;transition:var(--tr);font-family:inherit;}
++.tool-action-btn:hover{background:var(--bg4);border-color:var(--border2);}
++.tool-action-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
++.tool-action-btn.primary:hover{background:var(--accent2);}
++.tool-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px;display:flex;align-items:center;gap:12px;transition:var(--tr);}
++.tool-card:hover{border-color:var(--border2);background:var(--bg3);}
++.tool-card .tc-icon{font-size:18px;width:32px;text-align:center;}
++.tool-card .tc-info{flex:1;min-width:0;}
++.tool-card .tc-name{font-weight:600;font-size:13px;color:var(--text);}
++.tool-card .tc-cat{font-size:10px;color:var(--text4);margin-top:1px;}
++.tool-card .tc-status{display:flex;align-items:center;gap:6px;}
++.tool-card .tc-status .dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
++.tool-card .tc-status .dot.ok{background:var(--green);box-shadow:0 0 6px rgba(61,186,111,.4);}
++.tool-card .tc-status .dot.missing{background:var(--red);box-shadow:0 0 6px rgba(224,82,82,.4);}
++.tool-card .tc-install-btn{background:var(--bg4);border:1px solid var(--border);color:var(--text2);border-radius:var(--r-sm);padding:6px 12px;font-size:11px;cursor:pointer;transition:var(--tr);white-space:nowrap;}
++.tool-card .tc-install-btn:hover{background:var(--accent-low);border-color:var(--accent);color:var(--accent2);}
++.tool-card .tc-install-btn:disabled{opacity:.4;cursor:not-allowed;}
++.tool-action-btn{background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:var(--r);padding:8px 16px;font-size:12px;cursor:pointer;transition:var(--tr);font-family:inherit;}
++.tool-action-btn:hover{background:var(--bg4);border-color:var(--border2);}
++.tool-action-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
++.tool-action-btn.primary:hover{background:var(--accent2);}
++
++
++#tools-grid{margin-top:8px;}
+ </style>
+ </head>
+ <body>
+@@ -1018,6 +1073,8 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+       <button class="tab-btn active" id="tab-btn-chat"      onclick="switchTab('chat')">­ƒÆ¼ Chat</button>
+       <button class="tab-btn"        id="tab-btn-dashboard" onclick="switchTab('dashboard')">­ƒôè Dashboard</button>
+       <button class="tab-btn"        id="tab-btn-history"   onclick="switchTab('history')">Ôî¿ Historial</button>
++      <button class="tab-btn"        id="tab-btn-config"    onclick="switchTab('config')">ÔÜÖ Config LLM</button>
++      <button class="tab-btn"        id="tab-btn-tools"     onclick="switchTab('tools')">­ƒöº Tools</button>
+     </div>
+     <div id="ollama-badge">
+       <div id="status-dot"></div>
+@@ -1131,6 +1188,106 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+     </div>
+   </div>
+ 
++  <!-- CONFIG TAB -->
++  <div class="tab-content" id="tab-config" style="padding: 24px; overflow-y: auto;">
++    <h2 style="margin-bottom: 16px;">Configuraci├│n y Sugerencias de Modelos</h2>
++    <p style="color: var(--text2); margin-bottom: 24px;">Selecciona el modelo adecuado para tu tarea en el panel derecho. A continuaci├│n se presentan las recomendaciones de la comunidad y del sistema para un rendimiento ├│ptimo.</p>
++    
++    <div style="background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 16px; margin-bottom: 20px;">
++      <h3 style="color: var(--accent); margin-bottom: 12px;">Modelos Recomendados (Ollama / LM Studio)</h3>
++      <table class="findings-table" style="width: 100%;">
++        <thead>
++          <tr>
++            <th>Modelo</th>
++            <th>Uso Principal</th>
++            <th>VRAM Min.</th>
++            <th>Notas</th>
++          </tr>
++        </thead>
++        <tbody>
++          <tr>
++            <td style="color: var(--text); font-weight: 600;">deepseek-r1:14b</td>
++            <td>Razonamiento general y Pentesting</td>
++            <td>~10 GB</td>
++            <td>Equilibrado, excelente para seguir instrucciones complejas.</td>
++          </tr>
++          <tr>
++            <td style="color: var(--text); font-weight: 600;">deepseek-r1:32b</td>
++            <td>An├ílisis profundo de c├│digo/exploits</td>
++            <td>~22 GB</td>
++            <td>El mejor para razonamiento avanzado. M├ís lento.</td>
++          </tr>
++          <tr>
++            <td style="color: var(--text); font-weight: 600;">qwen2.5-coder:32b</td>
++            <td>Desarrollo de scripts, an├ílisis de vulnerabilidades</td>
++            <td>~20 GB</td>
++            <td>Excelente para auditor├¡a de c├│digo y generaci├│n r├ípida.</td>
++          </tr>
++          <tr>
++            <td style="color: var(--text); font-weight: 600;">dolphin3 / dolphin-mixtral</td>
++            <td>Operaciones ofensivas / Red Team</td>
++            <td>~16 GB / ~24 GB</td>
++            <td>Modelos sin censura (uncensored). Muy permisivos para creaci├│n de payloads.</td>
++          </tr>
++          <tr>
++            <td style="color: var(--text); font-weight: 600;">llama3.1</td>
++            <td>Uso general (Blue Team, Reportes)</td>
++            <td>~6 GB (8b)</td>
++            <td>R├ípido y bueno para redacci├│n, pero puede negarse a generar exploits.</td>
++          </tr>
++        </tbody>
++      </table>
++    </div>
++    
++    <div style="background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 16px;">
++      <h3 style="color: var(--accent); margin-bottom: 12px;">Ajustes sugeridos en LM Studio</h3>
++      <ul style="color: var(--text2); padding-left: 20px; line-height: 1.8;">
++        <li>Activar <strong>Local Server</strong> en el puerto 1234 (opci├│n predeterminada).</li>
++        <li>Habilitar soporte CORS en la configuraci├│n del servidor de LM Studio si la UI y el LLM corren en m├íquinas diferentes.</li>
++        <li>Usar el formato de chat <strong>ChatML</strong> o <strong>Llama3</strong> seg├║n el modelo seleccionado.</li>
++        <li>Configurar <code style="background: var(--bg3); padding: 2px 4px; border-radius: 3px;">Context Length</code> al m├íximo soportado por tu VRAM (m├¡nimo recomendado: 8192, ideal: 32768).</li>
++        <li>Bajar la <strong>Temperatura</strong> a <code>0.1 - 0.3</code> para tareas anal├¡ticas y creaci├│n de exploits (menor alucinaci├│n).</li>
++      </ul>
++    </div>
++  </div>
++
++  <!-- TOOLS TAB -->
++  <div class="tab-content" id="tab-tools">
++    <div id="tools-content">
++      <div style="max-width:900px;margin:0 auto;padding:24px 16px;">
++        <h2 style="color:var(--accent);margin-bottom:8px;">­ƒöº Herramientas de Pentesting</h2>
++        <p style="color:var(--text3);font-size:13px;margin-bottom:24px;">
++          Estado de instalaci├│n de herramientas. Las que faltan pueden instalarse autom├íticamente.
++        </p>
++        <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
++          <button id="btn-install-all" class="tool-action-btn primary" onclick="installAllTools()">
++            ­ƒôª Instalar todas
++          </button>
++          <button id="btn-refresh-tools" class="tool-action-btn" onclick="loadTools()">
++            ­ƒöä Refrescar
++          </button>
++          <button id="btn-update-tools" class="tool-action-btn" onclick="updateTools()">
++            Ô¼å Actualizar templates
++          </button>
++        </div>
++        <div id="tools-install-progress" style="display:none;margin-bottom:16px;">
++          <div style="background:var(--bg3);border-radius:var(--r);padding:12px 16px;border:1px solid var(--accent-low);">
++            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
++              <span class="spinner">ÔÅ│</span>
++              <span id="install-status-msg" style="color:var(--accent2);font-size:13px;">Instalando...</span>
++            </div>
++            <div id="install-progress-bar" style="height:4px;background:var(--bg4);border-radius:2px;overflow:hidden;">
++              <div id="install-progress-fill" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width .3s ease;"></div>
++            </div>
++          </div>
++        </div>
++        <div id="tools-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;">
++          <div style="color:var(--text4);padding:20px;text-align:center;">Cargando herramientas...</div>
++        </div>
++      </div>
++    </div>
++  </div>
++
+ </main>
+ 
+ <!-- ÔòÉÔòÉ RIGHT PANEL ÔòÉÔòÉ -->
+@@ -1197,6 +1354,19 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+   </div>
+ </div>
+ 
++<!-- MODAL: Rename / Action -->
++<div id="action-modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center;">
++  <div class="modal">
++    <h2 id="action-modal-title">Confirmar</h2>
++    <p id="action-modal-desc" style="color: var(--text2); font-size: 13px; margin-bottom: 20px;"></p>
++    <input type="text" id="action-modal-input" style="width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--r-sm); padding: 8px 12px; color: var(--text); outline: none; margin-bottom: 20px; display: none;" />
++    <div class="modal-actions" style="display: flex; gap: 8px; justify-content: flex-end;">
++      <button class="btn-secondary" onclick="hideActionModal()">Cancelar</button>
++      <button class="btn-primary" id="action-modal-confirm">Aceptar</button>
++    </div>
++  </div>
++</div>
++
+ <div id="toasts"></div>
+ 
+ <script>
+@@ -1352,6 +1522,7 @@ function renderProjects(filter=''){
+         <span class="sess-icon">­ƒÆ¼</span>
+         <span class="sess-name">${esc(s.name)}</span>
+         <span class="sess-turns">${s.turns}t</span>
++        <button class="sess-del-btn" onclick="renameSession('${p.id}','${s.name}',event)" title="Renombrar sesi├│n">Ô£Å´©Å</button>
+         <button class="sess-del-btn" onclick="deleteSession('${p.id}','${s.name}',event)" title="Eliminar sesi├│n">Ô£ò</button>
+       </div>`;
+     }).join('')}
+@@ -1374,6 +1545,7 @@ async function selectSess(projId,sessName){
+   renderProjects(document.getElementById('search-input').value);
+   document.getElementById(`proj-${projId}`)?.classList.add('open','active');
+   await Promise.all([loadSkills(projId,sessName),loadHistory(projId,sessName),loadDash(projId)]);
++  setTimeout(resumeStreamIfNeeded, 100);
+ }
+ async function newSessForProj(projId){
+   try{
+@@ -1465,25 +1637,47 @@ function appendThinking(content,animate=true){
+   chat.appendChild(wrap);autoScroll();
+ }
+ 
++
++function cleanTerminalOutput(str) {
++  if (!str) return '';
++  str = str.replace(/\r\n/g, '\n');
++  return str.split('\n').map(l => {
++    const parts = l.split('\r');
++    return parts[parts.length - 1];
++  }).join('\n');
++}
++
+ let _cmdId=null;
++
+ function appendCmdBlock(cmd,stdout,stderr,code,cached){
+   const id='c'+Date.now()+'_'+(S.cmdIdx++);
+   const chat=document.getElementById('chat-messages');
+   const div=document.createElement('div');div.className='cmd-block';
+   const running=code===-1;
+   const sc=running?'run':(code===0?'ok':'err');
+-  const st=running?'Ôîø ejecutando':(code===0?'Ô£ô OK':`Ô£ù exit ${code}`);
+-  const out=((stdout||'')+(stderr?'\n'+stderr:'')).trim().slice(0,6000)||'(sin output)';
++  const st=running?'ÔºÉ ejecutando':(code===0?'Ô£ô OK':`Ô£ù exit ${code}`);
++  const rawOut=cleanTerminalOutput(((stdout||'')+(stderr?'\n'+stderr:'')).trim());
++  const out=rawOut.slice(0,8000)||'(sin output)';
++  const outBytes=rawOut.length;
++  const outLines=(rawOut.match(/\n/g)||[]).length+1;
++  const hasOut=rawOut.length>0;
++  // Auto-open if there's output and not still running
++  const isHistoryLoad = S._isHistoryLoad;
++  const shouldOpen=!running&&hasOut&&!isHistoryLoad;
++  // Return info badge
++  const retInfo=(!running&&hasOut)?
++    `<span class="cmd-ret-info">Ôå® ${outLines} l├¡nea${outLines!==1?'s':''} ┬À ${outBytes>1024?(outBytes/1024).toFixed(1)+'KB':outBytes+'B'}</span>`:'';
+   div.id=id+'_blk';
++  const outDivClass = shouldOpen ? 'cmd-out open' : 'cmd-out';
+   div.innerHTML=`
+-    <div class="cmd-header">
++    <div class="cmd-header" style="cursor:pointer;" onclick="toggleOut('${id}_out')">
+       <span class="cmd-prompt">ÔØ»</span>
+       <span class="cmd-text" title="${esc(cmd)}">${esc(cmd)}</span>
+       ${cached?'<span class="cmd-cache-tag">cach├®</span>':''}
+       <span class="cmd-status ${sc}" id="${id}_st">${st}</span>
+-      <button class="cmd-toggle-btn" onclick="toggleOut('${id}_out')">Ôû¥ output</button>
++      <button class="cmd-toggle-btn" >Ôû¥ output</button>
+     </div>
+-    <div class="cmd-out" id="${id}_out"><pre>${esc(out)}</pre></div>`;
++    <div class="${outDivClass}" id="${id}_out"><pre>${esc(out)}</pre></div>`;
+   chat.appendChild(div);autoScroll();
+   return id;
+ }
+@@ -1491,7 +1685,15 @@ function updateCmdBlock(id,stdout,stderr,code){
+   const stEl=document.getElementById(id+'_st');
+   const outEl=document.getElementById(id+'_out');
+   if(stEl){stEl.className='cmd-status '+(code===0?'ok':'err');stEl.textContent=code===0?'Ô£ô OK':`Ô£ù exit ${code}`;}
+-  if(outEl){const out=((stdout||'')+(stderr?'\n'+stderr:'')).trim().slice(0,6000)||'(sin output)';outEl.querySelector('pre').textContent=out;}
++    if(outEl){
++    const outRaw=cleanTerminalOutput(((stdout||'')+(stderr?'\n'+stderr:'')).trim());
++    const out=outRaw.slice(0,6000)||'(sin output)';
++    outEl.querySelector('pre').textContent=out;
++    // Auto open when it finishes and there is actual output
++    if(code !== -1 && outRaw.length > 0){
++      outEl.classList.add('open');
++    }
++  }
+ }
+ function toggleOut(id){document.getElementById(id)?.classList.toggle('open');}
+ 
+@@ -1503,19 +1705,27 @@ function appendSkillBlock(name,output,success,findings,running=false){
+   const chat=document.getElementById('chat-messages');
+   const div=document.createElement('div');div.className='skill-block';
+   const sid='sk'+Date.now()+'_'+(Math.random()*9999|0);
+-  const stHtml=running?`<span class="skill-running">Ôîø ejecutandoÔÇª</span>`:
+-    (success?`<span class="skill-ok">Ô£ô OK</span>`:`<span class="skill-err">Ô£ù Error</span>`);
+-  const badge=findings&&findings.length?`<span class="skill-count">­ƒÄ» ${findings.length} hallazgo${findings.length!==1?'s':''}</span>`:'';
+-  const shouldOpen=!running&&output&&(
+-    _AUTOOPEN_SKILLS.has(name)||(findings&&findings.length>=3)||output.length>400
+-  );
+-  div.innerHTML=`
+-    <div class="skill-header">
+-      <span class="skill-name">ÔÜí SKILL:${esc(name)}</span>
+-      ${stHtml}${badge}
+-      ${output?`<button class="skill-toggle-btn" onclick="toggleOut('${sid}_out')">Ôû¥ output</button>`:''}
+-    </div>
+-    ${output?`<div class="skill-out${shouldOpen?' open':''}" id="${sid}_out"><pre>${esc(output.trim().slice(0,4000))}</pre></div>`:''}`;
++  const stHtml=running
++    ?'<span class="skill-running">\u29d0 ejecutando\u2026</span>'
++    :(success?'<span class="skill-ok">\u2713 OK</span>':'<span class="skill-err">\u2717 Error</span>');
++  const badge=findings&&findings.length
++    ?`<span class="skill-count">\ud83c\udfaf ${findings.length} hallazgo${findings.length!==1?'s':''}</span>`:'';
++  const isHistoryLoad = S._isHistoryLoad;
++  const shouldOpen=!running&&!!output&&!isHistoryLoad;
++  const trimOut=cleanTerminalOutput((output||'').trim());
++  const outDivClass = shouldOpen ? 'skill-out open' : 'skill-out';
++  const outBytes=trimOut.length;
++  const outLines=trimOut?(trimOut.match(/\n/g)||[]).length+1:0;
++  let retBanner='';
++  if(!running&&trimOut){
++    retBanner='<div class="skill-ret-banner">\ud83d\udce4 Devuelto: <strong>'+outLines+' l\u00ednea'+(outLines!==1?'s':'')+'</strong>'
++      +' &middot; <strong>'+(outBytes>1024?(outBytes/1024).toFixed(1)+'KB':outBytes+'B')+'</strong>'
++      +(findings&&findings.length?' &middot; <strong>'+findings.length+' hallazgo'+(findings.length!==1?'s':'')+'</strong>':'')
++      +'</div>';
++  }
++  const toggleBtn=trimOut?`<button class="skill-toggle-btn" >&#9662; output</button>`:'';
++  const outDiv=trimOut?`<div class="${outDivClass}" id="${sid}_out"><pre>${esc(trimOut.slice(0,6000))}</pre></div>`:'';
++  div.innerHTML=`<div class="skill-header" style="cursor:pointer;" onclick="toggleOut('${sid}_out')"><span class="skill-name">\u26a1 SKILL:${esc(name)}</span>${stHtml}${badge}${toggleBtn}</div>${retBanner}${outDiv}`;
+   chat.appendChild(div);autoScroll();
+ }
+ 
+@@ -1663,6 +1873,48 @@ async function sendMsg(){
+   }
+ }
+ 
++async function resumeStreamIfNeeded() {
++  if (S.streaming || !S.proj || !S.sess) return;
++  try {
++    const resp = await fetch(`/api/projects/${S.proj.id}/sessions/${S.sess}/chat`, {
++      method: 'POST', headers: {'Content-Type': 'application/json'},
++      body: JSON.stringify({ reconnect: true })
++    });
++    if (!resp.ok) return; // not active
++    
++    // Resume streaming UI state
++    S.streaming = true;
++    const btn = document.getElementById('btn-send');
++    btn.disabled = true; btn.classList.add('streaming');
++    btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>';
++    appendScanStatus('Reconectando a sesi├│n activaÔÇª');
++    
++    const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
++    while (true) {
++      const {done, value} = await reader.read(); if (done) break;
++      buf += dec.decode(value, {stream:true});
++      const lines = buf.split('\n'); buf = lines.pop() || '';
++      for (const line of lines) {
++        if (!line.startsWith('data: ')) continue;
++        try { handleSSE(JSON.parse(line.slice(6))); } catch{}
++      }
++    }
++  } catch(e) {
++    console.warn("Reconnect fetch error", e);
++  } finally {
++    if (S.streaming) {
++      S.streaming = false; removeTyping(); removeScanStatus();
++      const btn = document.getElementById('btn-send');
++      if (btn) {
++        btn.disabled = false; btn.classList.remove('streaming');
++        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
++      }
++      S._atBottom = true; autoScroll();
++      if(S.proj) loadDash(S.proj.id);
++    }
++  }
++}
++
+ /* ÔöÇÔöÇ SSE event handler ÔöÇÔöÇ */
+ function handleSSE(ev){
+   switch(ev.type){
+@@ -1672,7 +1924,7 @@ function handleSSE(ev){
+       appendThinking(ev.content);appendTyping();autoScroll();break;
+     case 'message':
+       removeScanStatus();removeTyping();
+-      appendAgentMsg(ev.content,ev.phase||'recon',ev.risk||'low');
++      appendAgentMsg(ev.content,ev.phase||'recon',ev.risk||'low',true);
+       appendTyping();autoScroll();break;
+     case 'status':
+       removeScanStatus();appendScanStatus(ev.content||'ProcesandoÔÇª');break;
+@@ -1683,7 +1935,7 @@ function handleSSE(ev){
+     case 'command_done':
+       removeTyping();
+       if(_cmdId){updateCmdBlock(_cmdId,ev.stdout,ev.stderr,ev.code);_cmdId=null;}
+-      else{appendCmdBlock(ev.cmd,ev.stdout,ev.stderr,ev.code,ev.cached);}
++      else{appendCmdBlock(ev.cmd,ev.stdout||'',ev.stderr||'',ev.code,ev.cached||false);}
+       appendTyping();autoScroll();break;
+     case 'skill_start':
+       removeScanStatus();removeTyping();
+@@ -1703,7 +1955,7 @@ function handleSSE(ev){
+       S.findings.push(...(ev.findings||[]));renderFindingCounts();break;
+     case 'fetch_done':
+       removeTyping();
+-      if(ev.status)appendAgentMsg(`­ƒîÉ Fetch \`${ev.url}\` ÔåÆ HTTP ${ev.status}`,'recon','low');
++      if(ev.status)appendAgentMsg(`­ƒîÉ Fetch \`${ev.url}\` ÔåÆ HTTP ${ev.status}`,'recon','low',false);
+       appendTyping();autoScroll();break;
+     case 'nuclei_findings':
+       toast(`­ƒÄ» Nuclei: ${(ev.findings||[]).length} hallazgo(s)`,'info');break;
+@@ -1741,7 +1993,7 @@ function _isSystemMsg(content){
+   return c.startsWith('[CONTEXTO TRUNCADO')||
+          c.startsWith('[RESUMEN COMPRIMIDO')||
+          c.startsWith('[BUCLE DETECTADO')||
+-         c.startsWith('[FORZADO]')||
++         c.startsWith('[FORZADO')||
+          c.startsWith('[YA EJECUTADOS')||
+          c.startsWith('[PROYECTO ÔÇö')||
+          c.startsWith('[TABLA OBLIGATORIA')||
+@@ -1766,45 +2018,112 @@ function _parseResultsMsg(content){
+ }
+ 
+ async function loadHistory(projId,sessName){
++  S._isHistoryLoad=true;
+   const chat=document.getElementById('chat-messages');
+   try{
+-    const d=await(await fetch(`/api/projects/${projId}/sessions/${sessName}/history`)).json();
++    // Fetch events log first (contains full tool outputs)
++    const evResp=await fetch(`/api/projects/${projId}/sessions/${sessName}/events`);
++    const evData=await evResp.json().catch(()=>({events:[]}));
++    const evLog=(evData.events||[]);
++
+     chat.innerHTML='';S._atBottom=true;
+-    const msgs=d.messages||[];
+-    for(const msg of msgs){
+-      if(msg.role==='system')continue;
+-      if(msg.role==='user'){
+-        const stripped=_stripApiKeys(msg.content);
+-        if(_isSystemMsg(stripped))continue;
+-        const items=_parseResultsMsg(stripped);
+-        if(items){
+-          // Render skill/command results as blocks instead of raw user bubbles
+-          for(const it of items){
+-            const cmd=it.command||'';
+-            const isSkill=cmd.startsWith('SKILL:')||it.skill;
+-            const sname=(it.skill)||(cmd.replace(/^SKILL:/,'').split(' ')[0]);
+-            const sout=(it.stdout||it.output||'').trim();
+-            const sok=it.success!==undefined?it.success:(it.returncode===0);
+-            const sfinds=it.findings||[];
+-            if(isSkill&&sname){
+-              appendSkillBlock(sname,sout,sok,sfinds,false);
+-            } else if(cmd&&!isSkill){
+-              appendCmdBlock(cmd,it.stdout||'',it.stderr||'',it.returncode??0,false);
++
++    if(evLog.length>0){
++      // Replay from events log
++      // Pre-scan: find which skill_start/command_start have a following done event
++      const startHasDone=new Set();
++      for(let i=0;i<evLog.length;i++){
++        const ev=evLog[i];
++        if(ev.type==='skill_start'||ev.type==='command_start'){
++          const doneType=ev.type==='skill_start'?'skill_done':'command_done';
++          for(let j=i+1;j<evLog.length;j++){
++            if(evLog[j].type===doneType){startHasDone.add(i);break;}
++            if(evLog[j].type==='user_turn')break;
++          }
++        }
++      }
++      let _histCmdId=null;
++      for(let i=0;i<evLog.length;i++){
++        const ev=evLog[i];
++        switch(ev.type){
++          case 'user_turn':
++            appendUserMsg(ev.content,true);
++            _histCmdId=null;
++            break;
++          case 'thinking':
++            appendThinking(ev.content,true);
++            break;
++          case 'message':
++            appendAgentMsg(ev.content,ev.phase||'recon',ev.risk||'low',true);
++            break;
++          case 'command_start':
++            // Only show running block if no done follows (interrupted session)
++            if(!startHasDone.has(i)){
++              _histCmdId=appendCmdBlock(ev.cmd,'','',-1,false);
++            }
++            break;
++          case 'command_done':
++            if(_histCmdId){updateCmdBlock(_histCmdId,ev.stdout,ev.stderr,ev.code);_histCmdId=null;}
++            else{appendCmdBlock(ev.cmd,ev.stdout||'',ev.stderr||'',ev.code,ev.cached||false);}
++            break;
++          case 'skill_start':
++            // Only show running block if no done follows (interrupted session)
++            if(!startHasDone.has(i))appendSkillBlock(ev.skill,'',true,[],true);
++            break;
++          case 'skill_done':
++            appendSkillBlock(ev.skill,ev.output||'',ev.success,ev.findings||[],false);
++            if(ev.findings?.length){S.findings.push(...ev.findings);renderFindingCounts();}
++            break;
++          case 'fetch_done':
++            if(ev.status)appendAgentMsg(`­ƒîÉ Fetch \`${ev.url}\` ÔåÆ HTTP ${ev.status}`,'recon','low',false);
++            break;
++          case 'file_ready':
++            appendFileBlock(ev.filename||'output.txt',ev.content||'',ev.language||'text',ev.path||'');
++            break;
++          case 'error':
++            appendAgentMsg(`ÔØî ${ev.content}`,'recon','critical',false);
++            break;
++        }
++      }
++    } else {
++      // Fallback: reconstruct from conversation JSON
++      const d=await(await fetch(`/api/projects/${projId}/sessions/${sessName}/history`)).json();
++      const msgs=d.messages||[];
++      for(const msg of msgs){
++        if(msg.role==='system')continue;
++        if(msg.role==='user'){
++          const stripped=_stripApiKeys(msg.content);
++          if(_isSystemMsg(stripped))continue;
++          const items=_parseResultsMsg(stripped);
++          if(items){
++            for(const it of items){
++              const cmd=it.command||'';
++              const isSkill=cmd.startsWith('SKILL:')||it.skill;
++              const sname=(it.skill)||(cmd.replace(/^SKILL:/,'').split(' ')[0]);
++              const sout=(it.stdout||it.output||'').trim();
++              const sok=it.success!==undefined?it.success:(it.returncode===0);
++              const sfinds=it.findings||[];
++              if(isSkill&&sname){
++                appendSkillBlock(sname,sout,sok,sfinds,false);
++              } else if(cmd&&!isSkill){
++                appendCmdBlock(cmd,it.stdout||'',it.stderr||'',it.returncode??0,false);
++              }
+             }
++          } else if(stripped.trim()){
++            appendUserMsg(stripped,false);
+           }
+-        } else if(stripped.trim()){
+-          appendUserMsg(stripped,false);
++        } else if(msg.role==='assistant'){
++          try{
++            const p=JSON.parse(msg.content);
++            if(p.thinking?.trim())appendThinking(p.thinking,false);
++            if(p.message?.trim())appendAgentMsg(p.message,p.phase||'recon',p.risk_level||'low',false);
++          }catch{if(msg.content?.trim())appendAgentMsg(msg.content,'recon','low',false);}
+         }
+-      } else if(msg.role==='assistant'){
+-        try{
+-          const p=JSON.parse(msg.content);
+-          if(p.thinking?.trim())appendThinking(p.thinking,false);
+-          if(p.message?.trim())appendAgentMsg(p.message,p.phase||'recon',p.risk_level||'low',false);
+-        }catch{if(msg.content?.trim())appendAgentMsg(msg.content,'recon','low',false);}
+       }
++      if(!msgs.length)chat.innerHTML=`<div style="color:var(--text4);font-size:13px;text-align:center;padding:60px 20px;"><div style="font-size:28px;margin-bottom:10px;">Ô£Å´©Å</div>Nueva sesi├│n ÔÇö escribe tu primera instrucci├│n.</div>`;
+     }
+-    if(!msgs.length)chat.innerHTML=`<div style="color:var(--text4);font-size:13px;text-align:center;padding:60px 20px;"><div style="font-size:28px;margin-bottom:10px;">Ô£Å´©Å</div>Nueva sesi├│n ÔÇö escribe tu primera instrucci├│n.</div>`;
+-    // Mark all loaded thinking blocks as done (they're from a past completed turn)
++    if(!chat.children.length)chat.innerHTML=`<div style="color:var(--text4);font-size:13px;text-align:center;padding:60px 20px;"><div style="font-size:28px;margin-bottom:10px;">Ô£Å´©Å</div>Nueva sesi├│n ÔÇö escribe tu primera instrucci├│n.</div>`;
++    // Mark all loaded thinking blocks as done
+     document.querySelectorAll('.thinking-block').forEach(b=>{
+       b.classList.add('done');
+       const lbl=b.querySelector('.thinking-summary-label');
+@@ -1814,21 +2133,71 @@ async function loadHistory(projId,sessName){
+   }catch(e){console.error(e);}
+ }
+ 
+-async function deleteSession(projId,sessName,ev){
++function hideActionModal() {
++  document.getElementById('action-modal-overlay').style.display = 'none';
++  document.getElementById('action-modal-input').style.display = 'none';
++  document.getElementById('action-modal-input').value = '';
++}
++
++function showActionModal(title, desc, confirmCallback, showInput = false, inputPlaceholder = '') {
++  document.getElementById('action-modal-title').textContent = title;
++  document.getElementById('action-modal-desc').textContent = desc;
++  const overlay = document.getElementById('action-modal-overlay');
++  const input = document.getElementById('action-modal-input');
++  const btn = document.getElementById('action-modal-confirm');
++  
++  if (showInput) {
++    input.style.display = 'block';
++    input.placeholder = inputPlaceholder;
++    input.focus();
++  } else {
++    input.style.display = 'none';
++  }
++  
++  btn.onclick = () => { confirmCallback(input.value); };
++  overlay.style.display = 'flex';
++}
++
++function renameSession(projId, sessName, ev) {
+   ev.stopPropagation();
+-  if(!confirm(`┬┐Eliminar sesi├│n "${sessName}"?`))return;
+-  try{
+-    const r=await fetch(`/api/projects/${projId}/sessions/${sessName}`,{method:'DELETE'});
+-    if(!r.ok)throw new Error(await r.text());
+-    if(S.sess===sessName&&S.proj&&S.proj.id===projId){
+-      document.getElementById('chat-messages').innerHTML='';
+-      document.getElementById('chat-input-area').classList.add('hidden');
+-      document.getElementById('btn-send').disabled=true;
+-      S.sess=null;
+-    }
+-    await loadProjects();
+-    toast('Sesi├│n eliminada','success');
+-  }catch(e){toast('Error al eliminar: '+e.message,'error');}
++  showActionModal('Renombrar sesi├│n', `Introduce el nuevo nombre para "${sessName}":`, async (newName) => {
++    if (!newName.trim()) { toast('El nombre no puede estar vac├¡o', 'error'); return; }
++    try {
++      const r = await fetch(`/api/projects/${projId}/sessions/${sessName}`, {
++        method: 'PUT',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({ name: newName })
++      });
++      if (!r.ok) throw new Error(await r.text());
++      const res = await r.json();
++      if (S.sess === sessName && S.proj && S.proj.id === projId) {
++        S.sess = res.new_name;
++        document.getElementById('ctx-sess').textContent = S.sess;
++      }
++      hideActionModal();
++      await loadProjects();
++      toast('Sesi├│n renombrada', 'success');
++    } catch (e) { toast('Error al renombrar: ' + e.message, 'error'); }
++  }, true, sessName);
++}
++
++function deleteSession(projId, sessName, ev) {
++  ev.stopPropagation();
++  showActionModal('Eliminar sesi├│n', `┬┐Est├ís seguro que deseas eliminar la sesi├│n "${sessName}"? Esto no se puede deshacer.`, async () => {
++    try {
++      const r = await fetch(`/api/projects/${projId}/sessions/${sessName}`, { method: 'DELETE' });
++      if (!r.ok) throw new Error(await r.text());
++      if (S.sess === sessName && S.proj && S.proj.id === projId) {
++        document.getElementById('chat-messages').innerHTML = '';
++        document.getElementById('chat-input-area').classList.add('hidden');
++        document.getElementById('btn-send').disabled = true;
++        S.sess = null;
++      }
++      hideActionModal();
++      await loadProjects();
++      toast('Sesi├│n eliminada', 'success');
++    } catch (e) { toast('Error al eliminar: ' + e.message, 'error'); }
++  });
+ }
+ 
+ /* ÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉÔòÉ

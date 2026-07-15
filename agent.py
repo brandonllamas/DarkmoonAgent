@@ -16,6 +16,7 @@ import threading
 import queue
 import time
 import itertools
+import database
 from pathlib import Path
 from datetime import datetime
 
@@ -45,6 +46,14 @@ if _env_file.exists():
             _k, _, _v = _line.partition("=")
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
+# ── Tool Manager (auto-install) ──────────────────────────────────────────────
+_HAVE_TOOL_MANAGER = False
+try:
+    import tool_manager
+    _HAVE_TOOL_MANAGER = True
+except ImportError:
+    tool_manager = None  # type: ignore
+
 # ── Colores ANSI ──────────────────────────────────────────────────────────────
 R       = "\033[0m"
 BOLD    = "\033[1m"
@@ -62,7 +71,9 @@ BASE_DIR   = Path(__file__).parent
 OUT_DIR    = BASE_DIR / "out"
 ENV_FILE   = BASE_DIR / ".env"
 CONFS_FILE = BASE_DIR / "confs.json"
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+LMSTUDIO_URL = os.environ.get("LMSTUDIO_URL", "http://localhost:1234/v1")
+LLM_BACKEND  = "ollama"   # "ollama" o "lmstudio" — se setea en main()
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -197,13 +208,7 @@ _CACHEABLE_TOOLS = {
 
 class ScanCache:
     def __init__(self, target_dir: Path):
-        self._path = target_dir / "scan_cache.json"
-        self._data: dict = {}
-        if self._path.exists():
-            try:
-                self._data = json.loads(self._path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+        self.project_id = target_dir.name
 
     def _key(self, cmd: str) -> str:
         return re.sub(r"\s+", " ", cmd.strip())
@@ -215,25 +220,17 @@ class ScanCache:
     def get(self, cmd: str) -> dict | None:
         if not self._cacheable(cmd):
             return None
-        entry = self._data.get(self._key(cmd))
-        if entry:
-            age_h = (time.time() - entry.get("_ts", 0)) / 3600
+        entry = database.get_cache(self._key(cmd))
+        if entry and entry["project_id"] == self.project_id:
+            age_h = (time.time() - entry["ts"]) / 3600
             if age_h < 24:
-                return entry
+                return {"stdout": entry["stdout"], "stderr": entry["stderr"], "code": entry["code"]}
         return None
 
     def put(self, cmd: str, stdout: str, stderr: str, code: int):
         if not self._cacheable(cmd):
             return
-        self._data[self._key(cmd)] = {
-            "stdout": stdout, "stderr": stderr, "code": code,
-            "_ts": time.time(), "_cached_at": datetime.now().isoformat()
-        }
-        try:
-            self._path.write_text(json.dumps(self._data, ensure_ascii=False, indent=2),
-                                  encoding="utf-8")
-        except Exception:
-            pass
+        database.put_cache(self.project_id, self._key(cmd), stdout, stderr, code, time.time())
 
 # ── SubAgent — agente ligero por tarea ───────────────────────────────────────
 class SubAgent:
@@ -273,19 +270,12 @@ class SubAgent:
             prompt += f"  |  Objetivo: {self.target}"
         prompt += f"\n\nOutput ({len(self.skill_output)} chars):\n{self.skill_output[:6000]}"
         try:
-            payload = {
-                "model":    self.model,
-                "messages": [
-                    {"role": "system", "content": self._SYSTEM},
-                    {"role": "user",   "content": prompt},
-                ],
-                "stream":  False,
-                "format":  "json",
-                "options": {"temperature": 0.1, "num_ctx": 4096},
-            }
-            r = requests.post(OLLAMA_URL, json=payload, timeout=120)
-            r.raise_for_status()
-            content = r.json()["message"]["content"]
+            messages = [
+                {"role": "system", "content": self._SYSTEM},
+                {"role": "user",   "content": prompt},
+            ]
+            content = call_llm_raw(self.model, messages, json_mode=True,
+                                   temperature=0.1, ctx_size=4096, timeout=120)
             try:
                 self.result = json.loads(content)
             except json.JSONDecodeError:
@@ -394,11 +384,12 @@ METODOLOGÍA EXPLOIT (cuando se encuentran CVEs o vulns):
 8. Verificar SSRF/LFI/RFI: curl con parámetros manipulados
 
 METODOLOGÍA RED/HOST:
-1. Reconocimiento: nmap, subfinder, amass, theharvester
-2. Escaneo: nmap -sV -sC, enum4linux, smbclient
+1. Reconocimiento RÁPIDO: nmap -sn -T4 --min-rate 1000, subfinder, amass, theharvester
+2. Escaneo RÁPIDO: nmap -sV -sC -T4 -F --min-rate 1000, enum4linux, smbclient
 3. AD/SMB: crackmapexec / netexec smb <target> -u '' -p '' --shares
 4. Exploits: searchsploit + msfconsole, exploits manuales
 5. Post-explotación: linpeas/winpeas, escalada, persistence
+* REGLA DE VELOCIDAD: Aplica siempre banderas de máxima velocidad (-T4, --min-rate 1000, -F, threads altos) en TODAS tus herramientas (nmap, ffuf, gobuster, nuclei) para que el escaneo sea SUPER RÁPIDO.
 
 REGLAS CRÍTICAS:
 1. Responde SIEMPRE en JSON válido, sin texto adicional.
@@ -406,7 +397,7 @@ REGLAS CRÍTICAS:
 3. Explica razonamiento técnico en "thinking" (español). NUNCA en "message".
 4. "message" es SOLO una línea breve en español explicando qué vas a hacer o qué encontraste.
 5. NUNCA devuelvas commands:[] con una explicación larga en message. Si no tienes info suficiente, pregunta en message Y emite los comandos de recon básico al mismo tiempo.
-6. En tu PRIMERA respuesta a cualquier objetivo SIEMPRE emite al menos 3 comandos de recon inmediatos. NO expliques primero.
+6. En tu PRIMERA respuesta a cualquier objetivo SIEMPRE lista las IPs/dominios encontrados primero en "message" y explica claramente qué vas a escanear a continuación, ANTES de lanzar comandos masivos. NO asumas que el usuario sabe lo que harás.
 7. Si necesitas info adicional, pregunta EN EL MISMO JSON y sigue ejecutando comandos de recon mientras esperas.
 8. NUNCA repitas un comando que aparezca en [YA EJECUTADOS].
 9. Con WAF/Cloudflare: usa recon pasivo (subfinder, amass, dig, whois, crt.sh, waybackurls, shodan).
@@ -490,21 +481,48 @@ Incluye: objetivo auditado, fases completadas, hallazgos/CVEs encontrados, herra
 estado actual del análisis y próximos pasos pendientes. Sin markdown excesivo, texto directo."""
 
 # ── Resumen incremental de contexto ──────────────────────────────────────────
-SUMMARIZE_CHARS = 22000
+SUMMARIZE_CHARS = 12000
 SUMMARIZE_KEEP  = 3  # últimos N pares user/assistant que se conservan sin comprimir
 
 def _hard_truncate(conv: list, target_chars: int = 16000) -> list:
-    """Fallback sin LLM: descarta mensajes antiguos (excepto system) hasta caber en target_chars."""
+    """Fallback estricto: reduce el contexto recortando mensajes antiguos y textos largos hasta caber en target_chars."""
     system  = [m for m in conv if m["role"] == "system"]
     history = [m for m in conv if m["role"] != "system"]
-    # Conservar siempre los últimos SUMMARIZE_KEEP * 2 mensajes
+    
+    # Primero, eliminar mensajes antiguos hasta dejar solo el último mensaje (o los que quepan)
     while history and sum(len(m["content"]) for m in system + history) > target_chars:
-        if len(history) <= SUMMARIZE_KEEP * 2:
+        if len(history) <= 1:
             break
         history.pop(0)
+    
+    # Si sigue pasándose, recortar el contenido de los mensajes en el history (del más viejo al más nuevo)
+    current_len = sum(len(m["content"]) for m in system + history)
+    if current_len > target_chars:
+        excess = current_len - target_chars
+        for i in range(len(history)):
+            msg_len = len(history[i]["content"])
+            # Si este mensaje es lo bastante grande para absorber todo o parte del exceso
+            # (dejando al menos 200 caracteres de él)
+            if msg_len > 200:
+                cut = min(excess, msg_len - 200)
+                if cut > 0:
+                    history[i]["content"] = history[i]["content"][:-(cut + 100)] + "\n[... TRUNCADO ...]"
+                    excess -= cut
+            if excess <= 0:
+                break
+        
+        # If we STILL have excess (e.g. system prompt is too big), truncate the system prompt
+        if excess > 0 and system:
+            sys_len = len(system[0]["content"])
+            if sys_len > 1000:
+                cut = min(excess, sys_len - 1000)
+                if cut > 0:
+                    system[0]["content"] = system[0]["content"][:-(cut + 100)] + "\n[... TRUNCADO ...]"
+                    excess -= cut
+
     dropped_notice = {
         "role": "user",
-        "content": "[CONTEXTO TRUNCADO AUTOMÁTICAMENTE — mensajes antiguos eliminados para liberar espacio]"
+        "content": "[CONTEXTO TRUNCADO AUTOMÁTICAMENTE PARA LIBERAR ESPACIO]"
     }
     return system + [dropped_notice] + history
 
@@ -525,7 +543,7 @@ def summarize_if_needed(model: str, conv: list) -> list:
     prompt = f"{SUMMARIZE_PROMPT}\n\nHISTORIAL:\n{compress_text}"
     print(f"\n  {YELLOW}📝 Comprimiendo contexto ({total//1000}K chars → resumen)...{R}")
     try:
-        summary = call_ollama_text(model, prompt, timeout=240)
+        summary = call_llm_text(model, prompt, timeout=240)
         summary_msg = {"role": "user",
                        "content": f"[RESUMEN COMPRIMIDO DE HALLAZGOS PREVIOS]\n{summary}"}
         ack_msg = {"role": "assistant", "content": json.dumps({
@@ -610,76 +628,56 @@ class LogWriter:
 
 # ── ProjectState — persistencia de hallazgos entre sesiones ──────────────────
 class ProjectState:
-    """Guarda dominios descubiertos y hallazgos con severidad en project_state.json."""
+    """Guarda dominios descubiertos y hallazgos con severidad en database."""
 
     _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
     def __init__(self, target_dir: Path, project_name: str = "", target: str = "", project_type: str = ""):
-        self.path         = target_dir / "project_state.json"
-        self.project_name = project_name
-        self.target       = target
+        self.project_id = target_dir.name
+        self.project_name = project_name or self.project_id
+        self.target = target
         self.project_type = project_type
-        self.domains: set = set()
-        self.findings: list = []
-        self._load()
+        
+        p = database.get_project(self.project_id)
+        if p:
+            self.project_name = p.get("name") or self.project_name
+            self.target = p.get("target") or self.target
+            self.project_type = p.get("project_type") or self.project_type
+        else:
+            database.upsert_project(self.project_id, self.project_name, self.target, self.project_type)
 
-    def _load(self):
-        if self.path.exists():
-            try:
-                data = json.loads(self.path.read_text(encoding="utf-8"))
-                self.project_name = self.project_name or data.get("project_name", "")
-                self.target       = self.target or data.get("target", "")
-                self.project_type = self.project_type or data.get("project_type", "")
-                self.domains      = set(data.get("domains", []))
-                self.findings     = data.get("findings", [])
-            except Exception:
-                pass
+    @property
+    def domains(self):
+        return set(database.get_domains(self.project_id))
+        
+    @property
+    def findings(self):
+        return database.get_findings(self.project_id)
 
     def save(self):
-        sev_counts: dict = {}
-        for f in self.findings:
-            sev = f.get("severity", "info")
-            sev_counts[sev] = sev_counts.get(sev, 0) + 1
-        data = {
-            "project_name": self.project_name,
-            "target":       self.target,
-            "project_type": self.project_type,
-            "updated_at":   datetime.now().isoformat(),
-            "domains":      sorted(self.domains),
-            "sev_summary":  sev_counts,
-            "findings":     self.findings[-1000:],
-        }
-        self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        database.upsert_project(self.project_id, self.project_name, self.target, self.project_type)
 
     def add_domain(self, domain: str) -> bool:
         domain = domain.lower().strip().lstrip("*.")
-        if domain and domain not in self.domains:
-            self.domains.add(domain)
-            return True
+        if domain:
+            return database.add_domain(self.project_id, domain)
         return False
 
     def _finding_key(self, f: dict) -> tuple:
-        """Clave de deduplicación: tipo + valor truncado."""
         return (f.get("type", ""), str(f.get("value", ""))[:80])
 
     def add_finding(self, finding: dict):
         if not isinstance(finding, dict):
             return
         finding.setdefault("severity", "info")
-        # Deduplicar: no añadir si ya existe el mismo tipo+valor
-        key = self._finding_key(finding)
-        if any(self._finding_key(f) == key for f in self.findings[-200:]):
-            return
-        self.findings.append(finding)
+        database.add_finding(self.project_id, finding)
 
     def ingest_skill_findings(self, skill_name: str, findings: list):
-        """Extrae dominios y añade hallazgos con severidad al estado del proyecto."""
         new_domains = []
         for f in findings:
             if not isinstance(f, dict):
                 continue
             ftype = f.get("type", "")
-            # Extraer dominios de findings conocidos
             if ftype in ("subdomain", "subdomain_crt", "http_active"):
                 val = f.get("value", "")
                 if val and self.add_domain(val):
@@ -690,18 +688,14 @@ class ProjectState:
                 m = _re.search(r'https?://([^/\s]+)', raw_url)
                 if m:
                     self.add_domain(m.group(1))
-            # Guardar finding con fuente
             entry = dict(f)
             entry["source"] = skill_name
             self.add_finding(entry)
         return new_domains
 
     def severity_summary(self) -> str:
-        counts: dict = {}
-        for f in self.findings:
-            s = f.get("severity", "info")
-            counts[s] = counts.get(s, 0) + 1
-        parts = [f"{counts[s]} {s}" for s in ["critical","high","medium","low","info"] if s in counts]
+        counts = database.get_severity_summary(self.project_id)
+        parts = [f"{counts[s]} {s}" for s in ["critical","high","medium","low","info"] if s in counts and counts[s] > 0]
         return f"{len(self.findings)} hallazgos ({', '.join(parts) or 'ninguno'})"
 
     def has_critical(self) -> bool:
@@ -713,44 +707,35 @@ class ProjectState:
 
 # ── Sesiones ──────────────────────────────────────────────────────────────────
 def save_session(name: str, conversation: list, model: str, target_dir: Path):
-    session_file = target_dir / f"{name}.json"
-    data = {"name": name, "model": model, "saved_at": datetime.now().isoformat(),
-            "target": target_dir.name, "conversation": conversation}
-    session_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return session_file
+    database.upsert_project(target_dir.name, target_dir.name, "", "full")
+    sess = database.get_session(name)
+    if not sess:
+        database.create_session(name, target_dir.name, model)
+    else:
+        database.update_session(name, model)
+    database.save_messages(name, conversation)
+    return target_dir / f"{name}.db_ref"
 
 
 def load_session(name: str):
-    if OUT_DIR.exists():
-        for d in sorted(OUT_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-            if d.is_dir():
-                f = d / f"{name}.json"
-                if f.exists():
-                    try:
-                        data = json.loads(f.read_text(encoding="utf-8"))
-                        return data.get("conversation", []), data.get("model"), d
-                    except Exception:
-                        return None, None, None
+    sess = database.get_session(name)
+    if sess:
+        project_dir = OUT_DIR / sess["project_id"]
+        project_dir.mkdir(parents=True, exist_ok=True)
+        return database.get_messages(name), sess["model"], project_dir
     return None, None, None
 
 
 def list_sessions():
     sessions = []
-    if not OUT_DIR.exists():
-        return sessions
-    for d in OUT_DIR.iterdir():
-        if d.is_dir():
-            for f in d.glob("*.json"):
-                try:
-                    data = json.loads(f.read_text(encoding="utf-8"))
-                    sessions.append({
-                        "name": f.stem, "target": f.parent.name,
-                        "saved_at": data.get("saved_at", "?"),
-                        "model": data.get("model", "?"),
-                        "turns": len([m for m in data.get("conversation", []) if m["role"] == "user"])
-                    })
-                except Exception:
-                    pass
+    for p in database.get_all_projects():
+        for s in database.get_sessions_for_project(p["id"]):
+            sessions.append({
+                "name": s["id"], "target": p["id"],
+                "saved_at": s["saved_at"],
+                "model": s["model"],
+                "turns": database.get_turn_count(s["id"])
+            })
     return sorted(sessions, key=lambda s: s["saved_at"], reverse=True)
 
 
@@ -759,48 +744,31 @@ def generate_session_name():
 
 
 def list_project_sessions(project_dir: Path) -> list:
-    """Lista sesiones dentro de un directorio de proyecto concreto."""
     sessions = []
-    for f in sorted(project_dir.glob("session_*.json"),
-                    key=lambda x: x.stat().st_mtime, reverse=True):
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-            # Ignorar project_state.json y report files
-            if "conversation" not in data:
-                continue
-            sessions.append({
-                "name":     f.stem,
-                "saved_at": data.get("saved_at", "?"),
-                "model":    data.get("model", "?"),
-                "turns":    len([m for m in data.get("conversation", []) if m["role"] == "user"]),
-            })
-        except Exception:
-            pass
+    for s in database.get_sessions_for_project(project_dir.name):
+        sessions.append({
+            "name": s["id"],
+            "saved_at": s["saved_at"],
+            "model": s["model"],
+            "turns": database.get_turn_count(s["id"]),
+        })
     return sessions
 
 
 def load_session_in_project(name: str, project_dir: Path):
-    """Carga una sesión directamente desde un directorio de proyecto."""
-    f = project_dir / f"{name}.json"
-    if f.exists():
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-            if "conversation" in data:
-                return data.get("conversation", []), data.get("model"), project_dir
-        except Exception:
-            pass
+    sess = database.get_session(name)
+    if sess and sess["project_id"] == project_dir.name:
+        return database.get_messages(name), sess["model"], project_dir
     return None, None, None
 
 
 def _read_project_meta(project_dir: Path) -> dict:
-    """Lee project_state.json del directorio y devuelve metadata resumida."""
-    ps_file = project_dir / "project_state.json"
-    if not ps_file.exists():
-        return {}
-    try:
-        return json.loads(ps_file.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    p = database.get_project(project_dir.name)
+    if p:
+        p["findings"] = database.get_findings(project_dir.name)
+        p["sev_summary"] = database.get_severity_summary(project_dir.name)
+        return p
+    return {}
 
 
 def pick_or_create_project() -> tuple:
@@ -1040,7 +1008,225 @@ def call_ollama_text(model: str, prompt: str, timeout: int = 180) -> str:
         raise Exception(f"Ollama {r.status_code}: {err}")
     return r.json()["message"]["content"]
 
+
+# ── LM Studio ────────────────────────────────────────────────────────────────
+def check_lmstudio():
+    """Verifica que LM Studio server local esté activo y lista los modelos."""
+    try:
+        r = requests.get(f"{LMSTUDIO_URL}/models", timeout=5)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            return True, [m["id"] for m in data if m.get("id")]
+    except Exception:
+        pass
+    return False, []
+
+
+def get_model_lmstudio(preferred=None):
+    ok, models = check_lmstudio()
+    if not ok:
+        print(f"{RED}✗ LM Studio no responde en {LMSTUDIO_URL}{R}")
+        print(f"  {DIM}Asegúrate de que el server local esté activo (lms server start){R}")
+        sys.exit(1)
+    if not models:
+        print(f"{RED}✗ Sin modelos cargados en LM Studio.{R}")
+        print(f"  {DIM}Carga un modelo desde la interfaz de LM Studio.{R}")
+        sys.exit(1)
+    if preferred and preferred in models:
+        return preferred, models
+    if preferred:
+        # Buscar coincidencia parcial
+        match = [m for m in models if preferred.lower() in m.lower()]
+        if match:
+            return match[0], models
+        print(f"{YELLOW}⚠ Modelo '{preferred}' no encontrado en LM Studio.{R}")
+    scored = sorted(models, key=lambda m: score_model(m)[0], reverse=True)
+    return scored[0], models
+
+
+def call_lmstudio(model: str, messages: list) -> dict:
+    """Llama a LM Studio (API compatible con OpenAI) y espera JSON."""
+    # Asegurar que el modelo devuelva JSON puro si es posible
+    messages_copy = messages.copy()
+    messages_copy.append({"role": "system", "content": "You MUST respond ONLY with valid, raw JSON. Do not use markdown blocks like ```json. Your entire response must be parseable by JSON.parse()."})
+    
+    payload = {
+        "model": model,
+        "messages": messages_copy,
+        "temperature": 0.1,
+        "max_tokens": -1,
+        "stream": False,
+    }
+    r = requests.post(f"{LMSTUDIO_URL}/chat/completions", json=payload, timeout=3600)
+    if not r.ok:
+        try:
+            err = r.json().get("error", {}).get("message", r.text[:300])
+        except Exception:
+            err = r.text[:300]
+        raise Exception(f"LM Studio {r.status_code}: {err}")
+    content = r.json()["choices"][0]["message"]["content"]
+    finish_reason = r.json()["choices"][0].get("finish_reason", "")
+    
+    if finish_reason == "length":
+        # Simulamos un error 400 de contexto para que _hard_truncate se encargue
+        raise Exception("400: LM Studio reached context limit (finish_reason: length). Needs truncation.")
+        
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        # Fallback: quitar markdown tags si los generó
+        cl = content.strip()
+        if cl.startswith("```json"): cl = cl[7:]
+        elif cl.startswith("```"): cl = cl[3:]
+        if cl.endswith("```"): cl = cl[:-3]
+        
+        s, e = cl.find("{"), cl.rfind("}") + 1
+        if s != -1 and e > s:
+            try:
+                return json.loads(cl[s:e])
+            except Exception:
+                pass
+        
+        print(f"\n[DEBUG JSON FALLBACK FAILED] Raw content:\n{content}\n")
+        return {"thinking": "", "commands": [], "message": content,
+                "requires_confirmation": False, "task_complete": False,
+                "_json_parse_error": True,
+                "risk_level": "low", "phase": "recon", "needs_api_keys": [],
+                "open_browser": "", "fetch_url": ""}
+
+
+def call_lmstudio_text(model: str, prompt: str, timeout: int = 180) -> str:
+    """Llama a LM Studio para respuesta de texto libre (sin JSON forzado)."""
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": -1,
+        "stream": False,
+    }
+    r = requests.post(f"{LMSTUDIO_URL}/chat/completions", json=payload, timeout=timeout)
+    if not r.ok:
+        try:
+            err = r.json().get("error", {}).get("message", r.text[:300])
+        except Exception:
+            err = r.text[:300]
+        raise Exception(f"LM Studio {r.status_code}: {err}")
+    return r.json()["choices"][0]["message"]["content"]
+
+
+# ── Backend wrappers — delegan a Ollama o LM Studio según LLM_BACKEND ────────
+def check_backend():
+    """Verifica el backend activo y retorna (ok, models_list)."""
+    if LLM_BACKEND == "lmstudio":
+        return check_lmstudio()
+    return check_ollama()
+
+
+def get_model_auto(preferred=None):
+    """Obtiene el mejor modelo del backend activo."""
+    if LLM_BACKEND == "lmstudio":
+        return get_model_lmstudio(preferred)
+    return get_model(preferred)
+
+
+def call_llm(model: str, messages: list) -> dict:
+    """Llama al backend activo y espera respuesta JSON (para el loop principal)."""
+    if LLM_BACKEND == "lmstudio":
+        return call_lmstudio(model, messages)
+    return call_ollama(model, messages)
+
+
+def call_llm_text(model: str, prompt: str, timeout: int = 180) -> str:
+    """Llama al backend activo para texto libre (reportes, resúmenes)."""
+    if LLM_BACKEND == "lmstudio":
+        return call_lmstudio_text(model, prompt, timeout)
+    return call_ollama_text(model, prompt, timeout)
+
+
+def call_llm_raw(model: str, messages: list, json_mode: bool = False,
+                 temperature: float = 0.1, ctx_size: int = 4096,
+                 timeout: int = 120) -> str:
+    """Llamada de bajo nivel que retorna el contenido crudo (str) del backend activo.
+    Usada por SubAgent y otros componentes que necesitan control fino."""
+    if LLM_BACKEND == "lmstudio":
+        payload = {
+            "model": model, "messages": messages,
+            "temperature": temperature, "max_tokens": ctx_size, "stream": False,
+        }
+        if json_mode:
+            # LM Studio no soporta json_object de forma nativa sin schema
+            pass
+        r = requests.post(f"{LMSTUDIO_URL}/chat/completions", json=payload, timeout=timeout)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
+    else:
+        payload = {
+            "model": model, "messages": messages, "stream": False,
+            "options": {"temperature": temperature, "num_ctx": ctx_size},
+        }
+        if json_mode:
+            payload["format"] = "json"
+        r = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
+        r.raise_for_status()
+        return r.json()["message"]["content"]
+
+
+def _backend_display_name() -> str:
+    """Nombre legible del backend activo."""
+    return "LM Studio" if LLM_BACKEND == "lmstudio" else "Ollama"
+
+
+def _backend_url() -> str:
+    """URL del backend activo."""
+    return LMSTUDIO_URL if LLM_BACKEND == "lmstudio" else OLLAMA_URL
+
+
+def pick_backend():
+    """Menú interactivo para elegir entre Ollama y LM Studio."""
+    global LLM_BACKEND
+    separator("═", CYAN + BOLD, 48)
+    print(f"{CYAN}{BOLD}  🤖  BACKEND LLM{R}")
+    separator("═", CYAN + BOLD, 48)
+    print()
+
+    # Detectar disponibilidad
+    ollama_ok, _   = check_ollama()
+    lmstudio_ok, _ = check_lmstudio()
+
+    ollama_status   = f"{GREEN}✓ online{R}" if ollama_ok   else f"{RED}✗ offline{R}"
+    lmstudio_status = f"{GREEN}✓ online{R}" if lmstudio_ok else f"{RED}✗ offline{R}"
+
+    print(f"    {BOLD}1.{R}  🦙 {CYAN}{BOLD}Ollama{R}      {DIM}({OLLAMA_URL}){R}  {ollama_status}")
+    print(f"    {BOLD}2.{R}  🖥️  {CYAN}{BOLD}LM Studio{R}   {DIM}({LMSTUDIO_URL}){R}  {lmstudio_status}")
+    print()
+
+    # Auto-selección si solo uno está activo
+    if ollama_ok and not lmstudio_ok:
+        print(f"  {GREEN}✓ Solo Ollama disponible → seleccionado automáticamente{R}")
+        LLM_BACKEND = "ollama"
+        print()
+        return
+    if lmstudio_ok and not ollama_ok:
+        print(f"  {GREEN}✓ Solo LM Studio disponible → seleccionado automáticamente{R}")
+        LLM_BACKEND = "lmstudio"
+        print()
+        return
+    if not ollama_ok and not lmstudio_ok:
+        print(f"  {RED}✗ Ningún backend disponible.{R}")
+        print(f"  {DIM}Inicia Ollama (ollama serve) o LM Studio (lms server start).{R}")
+        sys.exit(1)
+
+    sel = input(f"  {CYAN}?{R} Selecciona backend [1/2] (default=1): ").strip()
+    if sel == "2":
+        LLM_BACKEND = "lmstudio"
+        print(f"  {GREEN}✓ Backend:{R} {CYAN}{BOLD}LM Studio{R}\n")
+    else:
+        LLM_BACKEND = "ollama"
+        print(f"  {GREEN}✓ Backend:{R} {CYAN}{BOLD}Ollama{R}\n")
+
+
 # ── Ejecución de comandos ─────────────────────────────────────────────────────
+
 def run_command(cmd: str, cwd=None, timeout: int = None):
     t = timeout if timeout is not None else get_cmd_timeout(cmd)
     try:
@@ -1343,7 +1529,7 @@ def extract_vulns_from_log(model: str, log_content: str) -> list:
         f"LOG:\n{log_content[:60000]}"
     )
     try:
-        raw = call_ollama_text(model, prompt)
+        raw = call_llm_text(model, prompt)
         s, e = raw.find("["), raw.rfind("]") + 1
         if s != -1 and e > s:
             return json.loads(raw[s:e])
@@ -1438,7 +1624,8 @@ def print_help():
         ("sesiones",                   "lista las sesiones guardadas"),
         ("sesion guardar/cargar <n>",  "guarda o reanuda una sesión por nombre"),
         ("apikeys",                    "estado de las API keys (.env)"),
-        ("modelo <nombre>",            "cambia el modelo de Ollama en caliente"),
+        ("modelo <nombre>",            "cambia el modelo del backend activo en caliente"),
+        ("backend [ollama|lmstudio]",  "cambia backend LLM (Ollama ↔ LM Studio)"),
         ("reporte / html",            "genera reporte Markdown + HTML"),
         ("listame vulnerabilidades",   "parsea el log y numera las vulns"),
         ("explotar <N>",               "crea un PoC para la vulnerabilidad N"),
@@ -1450,13 +1637,30 @@ def print_help():
         ('hackea|escanea|pentest|audita <url>', "recon+scan automático (4 fases sin LLM) y explotación"),
         ('bypass|crackea|reversea|parchea …',   "ing. inversa automática de un binario/script/carpeta"),
         ('"bypass el login"',                  "descubre el archivo del login, lo revierte y te da el bypasseado"),
+        ('clasifica|classifica|valida',        "clasifica hallazgos como vulnerabilidad real o falso positivo usando IA"),
+        ('clasifica <texto>',                  "clasifica un hallazgo o archivo específico"),
+        ('optimiza|optimizar|tunea|mejora',    "optimiza el LLM: benchmark + diagnóstico + auto-tune"),
+        ('diagnostica|diagnostico|revisa',     "diagnostica el estado del LLM (conectividad, JSON, rendimiento)"),
     ]:
         print(f"    {GREEN}{trig:<38}{R}\n      {DIM}{desc}{R}")
+
+    print(f"\n  {CYAN}{BOLD}▸ OPTIMIZACIÓN DE IA (nuevos skills){R}")
+    print(f"    {WHITE}SKILL:llm_optimizer action=benchmark{R}    {DIM}prueba rendimiento y tasa de éxito JSON{R}")
+    print(f"    {WHITE}SKILL:llm_optimizer action=diagnose{R}     {DIM}diagnostica problemas del LLM{R}")
+    print(f"    {WHITE}SKILL:llm_optimizer action=optimize task=pentest{R}  {DIM}recomienda parámetros óptimos{R}")
+    print(f"    {WHITE}SKILL:llm_optimizer action=full_report{R}  {DIM}reporte completo (recomendado){R}")
+    print(f"    {WHITE}SKILL:prompt_engineer action=analyze{R}    {DIM}analiza el system prompt{R}")
+    print(f"    {WHITE}SKILL:prompt_engineer action=optimize{R}   {DIM}sugiere mejoras al prompt{R}")
+    print(f"    {WHITE}SKILL:prompt_engineer action=test{R}       {DIM}prueba variantes de prompt{R}")
+    print(f"    {WHITE}SKILL:prompt_engineer action=template{R}   {DIM}genera templates por tarea{R}")
+    print(f"    {WHITE}SKILL:response_validator action=quality_score{R} {DIM}puntúa calidad de respuestas{R}")
+    print(f"    {WHITE}SKILL:response_validator action=fix{R}     {DIM}corrige JSON malformado{R}")
 
     print(f"\n  {CYAN}{BOLD}▸ FLUJOS OFENSIVOS RECOMENDADOS{R}")
     print(f"    {WHITE}Web:{R}   {DIM}web_attack → sqli_scan (dump) → explotar{R}")
     print(f"    {WHITE}Creds:{R} {DIM}whiteintel (descarga) → cred_stuff (prueba y di cuál sirve){R}")
     print(f"    {WHITE}RE:{R}    {DIM}ing_inversa <carpeta|binario|script> → binfinal + run_bypass.sh{R}")
+    print(f"    {WHITE}Optim:{R} {DIM}SKILL:llm_optimizer action=full_report → mejora el LLM{R}")
 
     # ── Skills disponibles, agrupados por categoría (dinámico) ────────────────
     if _SKILLS_AVAILABLE:
@@ -1481,14 +1685,15 @@ def print_help():
 RISK_COLORS = {"low": GREEN, "medium": YELLOW, "high": RED, "critical": MAGENTA}
 PHASE_ICONS = {"recon": "🔍", "scan": "📡", "exploit": "💥", "post-exploit": "🏴", "report": "📋"}
 
-_BANNER = [
+def _build_banner() -> list:
+    return [
     f"{RED}{BOLD}  ██╗  ██╗ █████╗  ██████╗██╗  ██╗███████╗██████╗ {R}",
     f"{RED}{BOLD}  ██║  ██║██╔══██╗██╔════╝██║ ██╔╝██╔════╝██╔══██╗{R}",
     f"{RED}{BOLD}  ███████║███████║██║     █████╔╝ █████╗  ██████╔╝{R}",
     f"{RED}{BOLD}  ██╔══██║██╔══██║██║     ██╔═██╗ ██╔══╝  ██╔══██╗{R}",
     f"{RED}{BOLD}  ██║  ██║██║  ██║╚██████╗██║  ██╗███████╗██║  ██║{R}",
     f"{RED}{BOLD}  ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝{R}",
-    f"  {MAGENTA}{BOLD}A G E N T  v2{R}  {DIM}· Cybersecurity AI Terminal · Powered by Ollama{R}",
+    f"  {MAGENTA}{BOLD}A G E N T  v2{R}  {DIM}· Cybersecurity AI Terminal · Powered by {_backend_display_name()}{R}",
 ]
 
 _STARS = {5: f"{GREEN}★★★★★{R}", 4: f"{CYAN}★★★★{DIM}☆{R}",
@@ -1521,7 +1726,8 @@ def print_disclaimer():
 def print_header(model: str, session_name: str, all_models: list,
                  resumed: bool = False, tool_confs: list = None):
     print()
-    for line in _BANNER:
+    banner = _build_banner()
+    for line in banner:
         print(line)
         time.sleep(0.05)
     print()
@@ -1529,7 +1735,7 @@ def print_header(model: str, session_name: str, all_models: list,
     print(f"  {DIM}Modelo :{R}  {MAGENTA}{BOLD}{model}{R}")
     print(f"  {DIM}Sesión :{R}  {CYAN}{session_name}{R}  {DIM}{'(reanudada)' if resumed else '(nueva)'}{R}")
     print(f"  {DIM}Salida :{R}  {DIM}{OUT_DIR}{R}")
-    print(f"  {DIM}Ollama :{R}  {DIM}{OLLAMA_URL}{R}")
+    print(f"  {DIM}Backend:{R}  {CYAN}{BOLD}{_backend_display_name()}{R}  {DIM}{_backend_url()}{R}")
     separator("─", RED, 56)
     print(f"\n  {BOLD}Modelos disponibles:{R}")
     # Ordenar por puntuación
@@ -1555,7 +1761,7 @@ def print_header(model: str, session_name: str, all_models: list,
     separator("─", DIM, 56)
     print("  " + "  ·  ".join(f"{YELLOW}{v}{R}" for v in
           ["help", "salir", "cd <ruta>", "sesiones", "sesion guardar/cargar <n>",
-           "apikeys", "reporte", "listame vulnerabilidades", "explotar <N>"]))
+           "apikeys", "backend", "reporte", "listame vulnerabilidades", "explotar <N>"]))
     separator("─", DIM, 56)
     print()
 
@@ -1734,6 +1940,8 @@ def ask_session_config(available_skills: list = None, prefill_project_name: str 
     aggressiveness = ask_choice("Agresividad [1=pasivo … 5=agresivo]",
                                 ["1", "2", "3", "4", "5"], agr_default)
     use_subagents  = ask("¿Usar sub-agentes por skill? (análisis paralelo, contexto limpio)", True)
+    auto_classify  = ask("¿Auto-clasificar hallazgos con LLM? (distingue TP/FP)", True)
+    auto_optimize  = ask("¿Auto-optimizar LLM antes de cada instrucción? (recomendado)", True)
 
     # ── 3. Selección de skills ────────────────────────────────────────────────
     enabled_skills = pre_selected or available_skills or []
@@ -1812,6 +2020,8 @@ def ask_session_config(available_skills: list = None, prefill_project_name: str 
         "check_persistence": check_persist,
         "aggressiveness": int(aggressiveness),
         "use_subagents":  use_subagents,
+        "auto_classify":  auto_classify,
+        "auto_optimize":  auto_optimize,
         "enabled_skills": enabled_skills,
     }
     print(); separator("─", CYAN, 58)
@@ -1825,6 +2035,8 @@ def ask_session_config(available_skills: list = None, prefill_project_name: str 
         "check_persistence": "Buscar persistencia",
         "aggressiveness": "Agresividad",
         "use_subagents":  "Sub-agentes por skill",
+        "auto_classify":  "Auto-clasificar hallazgos",
+        "auto_optimize":  "Auto-optimizar LLM",
         "enabled_skills": "Skills activos",
     }
     for k, v in config.items():
@@ -1861,7 +2073,7 @@ def generate_report(model: str, session_name: str, log: LogWriter, target_dir: P
     print(f"\n  {MAGENTA}{BOLD}📋 Generando reporte de auditoría...{R}")
     try:
         with Spinner("generando reporte..."):
-            report_md = call_ollama_text(model, prompt)
+            report_md = call_llm_text(model, prompt)
     except Exception as e:
         print(f"  {RED}✗ Error generando reporte: {e}{R}"); return
     header = (f"<!-- HackerAgent Report -->\n"
@@ -2232,7 +2444,7 @@ def run_pentest_phases(target: str, log: LogWriter, cwd: str, cache: ScanCache) 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="HackerAgent v2")
-    parser.add_argument("--model",         "-m", help="Modelo de Ollama a usar")
+    parser.add_argument("--model",         "-m", help="Modelo a usar (Ollama o LM Studio)")
     parser.add_argument("--session",       "-s", help="Nombre de sesión")
     parser.add_argument("--list-sessions", "-l", action="store_true")
     parser.add_argument("--no-disclaimer",       action="store_true")
@@ -2244,6 +2456,10 @@ def main():
                         help="Puerto para la interfaz web (default: 7860)")
     parser.add_argument("--host",          default="0.0.0.0",
                         help="Host para la interfaz web (default: 0.0.0.0)")
+    parser.add_argument("--backend",       "-b",
+                        choices=["ollama", "lmstudio"],
+                        default=None,
+                        help="Backend LLM: ollama o lmstudio (si no se indica, se pregunta)")
     args = parser.parse_args()
 
     # ── Dispatch web mode ──────────────────────────────────────────────
@@ -2261,6 +2477,27 @@ def main():
     load_skills()
     available_skill_names = skill_names()
 
+    # ── Auto-install de herramientas esenciales ──────────────────────────────
+    if _HAVE_TOOL_MANAGER and not args.list_sessions:
+        print(f"\n  {DIM}🔧 Verificando herramientas esenciales...{R}")
+        missing = []
+        for _essential in ["nmap", "curl", "ffuf", "nuclei", "gobuster",
+                           "subfinder", "httpx", "whatweb", "dig", "whois"]:
+            if not tool_manager.check_tool(_essential):
+                missing.append(_essential)
+        if missing:
+            print(f"  {YELLOW}⚠ Herramientas faltantes: {', '.join(missing)}{R}")
+            print(f"  {DIM}Instalando automáticamente...{R}")
+            for _tool in missing:
+                _ok = tool_manager.install_tool(_tool)
+                if _ok:
+                    print(f"  {GREEN}✓ {_tool} instalado{R}")
+                else:
+                    print(f"  {DIM}· {_tool} — se omitirá (no crítica){R}")
+        else:
+            print(f"  {GREEN}✓ Todas las herramientas esenciales instaladas{R}")
+        print()
+
     if args.list_sessions:
         sessions = list_sessions()
         if not sessions:
@@ -2276,7 +2513,15 @@ def main():
     if not args.no_disclaimer:
         print_disclaimer()
 
-    model, all_models = get_model(args.model)
+    # ── Selección de backend LLM ──────────────────────────────────────
+    global LLM_BACKEND
+    if args.backend:
+        LLM_BACKEND = args.backend
+        print(f"  {GREEN}✓ Backend (CLI):{R} {CYAN}{BOLD}{_backend_display_name()}{R}\n")
+    else:
+        pick_backend()
+
+    model, all_models = get_model_auto(args.model)
 
     # ── Selección / creación de proyecto ──────────────────────────────────────
     session_config      = {}
@@ -2543,21 +2788,184 @@ def main():
         )
         if _model_match:
             new_model = _model_match.group(1).strip()
-            # Verificar que existe en Ollama
+            # Verificar que existe en el backend activo
             try:
-                _r = requests.get(
-                    OLLAMA_URL.replace("/api/chat", "/api/tags"), timeout=10
-                )
-                _available = [m["name"] for m in _r.json().get("models", [])]
+                _ok, _available = check_backend()
             except Exception:
                 _available = []
             if _available and not any(new_model in m for m in _available):
-                print(f"  {RED}✗ Modelo '{new_model}' no encontrado en Ollama.{R}")
+                print(f"  {RED}✗ Modelo '{new_model}' no encontrado en {_backend_display_name()}.{R}")
                 print(f"  {DIM}Disponibles: {', '.join(_available)}{R}")
             else:
                 model = new_model
                 print(f"  {GREEN}✓ Modelo cambiado a:{R} {CYAN}{BOLD}{model}{R}")
                 save_session(session_name, conversation, model, target_dir)
+            continue
+
+        # ── Cambio de backend (Ollama ↔ LM Studio) ───────────────────────────
+        _backend_match = re.match(
+            r'^(?:backend|cambiar backend|switch backend|usa backend)\s*(ollama|lmstudio|lm\s*studio)?$',
+            user_input.strip(), re.I,
+        )
+        _backend_bare = user_input.lower().strip() in ("backend", "backends")
+        if _backend_match or _backend_bare:
+            # Mostrar estado actual
+            _o_ok, _o_models = check_ollama()
+            _l_ok, _l_models = check_lmstudio()
+            _o_st = f"{GREEN}✓ online ({len(_o_models)} modelos){R}" if _o_ok else f"{RED}✗ offline{R}"
+            _l_st = f"{GREEN}✓ online ({len(_l_models)} modelos){R}" if _l_ok else f"{RED}✗ offline{R}"
+            print(f"\n  {CYAN}{BOLD}  BACKENDS LLM{R}")
+            separator("─", DIM, 50)
+            act_o = f"  {GREEN}← activo{R}" if LLM_BACKEND == "ollama" else ""
+            act_l = f"  {GREEN}← activo{R}" if LLM_BACKEND == "lmstudio" else ""
+            print(f"    {BOLD}1.{R}  🦙 {CYAN}Ollama{R}     {DIM}({OLLAMA_URL}){R}  {_o_st}{act_o}")
+            print(f"    {BOLD}2.{R}  🖥️  {CYAN}LM Studio{R}  {DIM}({LMSTUDIO_URL}){R}  {_l_st}{act_l}")
+            separator("─", DIM, 50)
+
+            new_be = None
+            if _backend_match and _backend_match.group(1):
+                raw = _backend_match.group(1).strip().lower().replace(" ", "")
+                new_be = "lmstudio" if "lm" in raw or "studio" in raw else "ollama"
+            else:
+                sel = input(f"  {CYAN}?{R} Selecciona backend [1=Ollama / 2=LM Studio]: ").strip()
+                if sel == "2":
+                    new_be = "lmstudio"
+                elif sel == "1":
+                    new_be = "ollama"
+                else:
+                    print(f"  {DIM}Sin cambios.{R}\n")
+                    continue
+
+            if new_be:
+                _check_fn = check_lmstudio if new_be == "lmstudio" else check_ollama
+                _be_ok, _be_models = _check_fn()
+                if not _be_ok:
+                    _be_name = "LM Studio" if new_be == "lmstudio" else "Ollama"
+                    print(f"  {RED}✗ {_be_name} no está online.{R}")
+                else:
+                    LLM_BACKEND = new_be
+                    # Re-seleccionar el mejor modelo del nuevo backend
+                    model, all_models = get_model_auto()
+                    print(f"  {GREEN}✓ Backend:{R} {CYAN}{BOLD}{_backend_display_name()}{R}")
+                    print(f"  {GREEN}✓ Modelo:{R}  {CYAN}{BOLD}{model}{R}")
+                    print(f"  {DIM}{len(all_models)} modelos disponibles{R}")
+                    save_session(session_name, conversation, model, target_dir)
+            print()
+            continue
+
+        # ── Vuln Classifier: detecta "clasifica / classifica / valida / verifica hallazgos" ─
+        _classify_match = re.match(
+            r'^(?:clasifica|classifica|valida|verifica|classify|validate)\s+(.+?)$',
+            user_input.strip(), re.I,
+        )
+        _classify_bare = re.match(
+            r'^(?:clasifica|classifica|valida|verifica(?:\s+hallazgos?)?|'
+            r'classify(?:\s+findings?)?|validate(?:\s+findings?)?|'
+            r'clasificar|validar|classificar)\s*$',
+            user_input.strip(), re.I,
+        )
+        if _classify_bare or _classify_match:
+            log.separator()
+            log.user_input(user_input)
+            if not _SKILLS_AVAILABLE:
+                print(f"  {RED}✗ Skills no disponibles.{R}")
+                continue
+
+            # Determinar qué clasificar
+            log_content = log.path.read_text(encoding="utf-8") if log.path.exists() else ""
+            target_text = ""
+            classify_source = "auto"
+
+            if _classify_match:
+                # Clasificar un texto/hallazgo específico
+                target_text = _classify_match.group(1).strip()
+                # Si es una ruta de archivo
+                p_check = Path(os.path.expanduser(target_text))
+                if p_check.exists():
+                    print(f"  {MAGENTA}{BOLD}▶ Clasificando archivo: {target_text}{R}")
+                    s_result = run_skill("vuln_classifier", file=str(p_check), source="auto")
+                else:
+                    print(f"  {MAGENTA}{BOLD}▶ Clasificando hallazgo: {target_text[:100]}...{R}")
+                    s_result = run_skill("vuln_classifier", input=target_text, source="auto")
+            else:
+                # Clasificar el log completo o findings del proyecto
+                if log_content and len(log_content) > 200:
+                    print(f"  {MAGENTA}{BOLD}▶ Clasificando hallazgos del log ({len(log_content)} chars)...{R}")
+                    # Si hay project_state findings, usarlos como JSON
+                    if project_state.findings:
+                        findings_json = json.dumps(project_state.findings, ensure_ascii=False)
+                        s_result = run_skill("vuln_classifier", input=log_content[:30000],
+                                              findings_json=findings_json, source="auto")
+                    else:
+                        s_result = run_skill("vuln_classifier", input=log_content[:30000], source="auto")
+                else:
+                    print(f"  {YELLOW}⚠ No hay hallazgos en el log aún. Ejecuta un escaneo primero.{R}")
+                    print(f"  {DIM}Usa: clasifica <texto del hallazgo>{R}")
+                    print(f"  {DIM}O  : clasifica /ruta/al/archivo.txt{R}")
+                    continue
+
+            s_out = s_result.get("output", "")
+            s_ok  = s_result.get("success", False)
+            s_findings = s_result.get("findings", [])
+
+            print()
+            for line in s_out.strip().split("\n"):
+                print(f"  {line}")
+
+            log.command("vuln_classifier (manual)", s_out[:5000], "", 0 if s_ok else 1)
+
+            if s_findings:
+                project_state.ingest_skill_findings("vuln_classifier", s_findings)
+                project_state.save()
+                true_pos = sum(1 for f in s_findings if f.get("verdict") == "TRUE_POSITIVE")
+                false_pos = sum(1 for f in s_findings if f.get("verdict") == "FALSE_POSITIVE")
+                print(f"\n  {GREEN}{BOLD}✓ Clasificación guardada:{R} {true_pos} TP, {false_pos} FP{R}")
+            continue
+
+        # ── Optimización IA: detecta "optimiza / tunea / mejora / diagnostica" ─
+        _opt_match = re.match(
+            r'^(?:optimiza|optimizar|tunea|mejora|mejorar|auto[- ]?tune)\s*$',
+            user_input.strip(), re.I,
+        )
+        _diag_match = re.match(
+            r'^(?:diagnostica|diagn[oó]stico|diagnostic|revisa|revisar|check)\s+'
+            r'(?:llm|modelo?|ia|ai)?\s*$',
+            user_input.strip(), re.I,
+        )
+        if _opt_match:
+            log.separator()
+            log.user_input(user_input)
+            if not _SKILLS_AVAILABLE:
+                print(f"  {RED}✗ Skills no disponibles.{R}")
+                continue
+            print(f"\n  {MAGENTA}{BOLD}▶ Optimizando LLM...{R}")
+            print(f"  {DIM}Ejecutando benchmark, diagnóstico y auto-tune...{R}")
+            s_result = run_skill("llm_optimizer", action="full_report", task="pentest")
+            s_out = s_result.get("output", "")
+            for line in s_out.strip().split("\n"):
+                print(f"  {line}")
+            log.command("llm_optimizer full_report", s_out[:3000], "", 0)
+            s_findings = s_result.get("findings", [])
+            if s_findings:
+                project_state.ingest_skill_findings("llm_optimizer", s_findings)
+                project_state.save()
+            print(f"\n  {YELLOW}💡 Prueba también:{R}")
+            print(f"     {CYAN}SKILL:prompt_engineer action=analyze{R}   — analiza el system prompt")
+            print(f"     {CYAN}SKILL:response_validator action=quality_score{R}")
+            continue
+
+        if _diag_match:
+            log.separator()
+            log.user_input(user_input)
+            if not _SKILLS_AVAILABLE:
+                print(f"  {RED}✗ Skills no disponibles.{R}")
+                continue
+            print(f"\n  {MAGENTA}{BOLD}▶ Diagnosticando LLM...{R}")
+            s_result = run_skill("llm_optimizer", action="diagnose")
+            s_out = s_result.get("output", "")
+            for line in s_out.strip().split("\n"):
+                print(f"  {line}")
+            log.command("llm_optimizer diagnose", s_out[:2000], "", 0)
             continue
 
         # ── Auto-RE: detecta "bypass / crackea / reversea …" ──────────────────
@@ -2636,6 +3044,17 @@ def main():
             )
             # cae al bloque del modelo (sin continue)
 
+        # ── Auto-optimización antes de cada instrucción ────────────────────
+        if _SKILLS_AVAILABLE and not pt_match and not _re_match:
+            try:
+                _opt_cfg = session_config or {}
+                if _opt_cfg.get("auto_optimize", True):
+                    _opt_result = run_skill("auto_optimizer", action="auto", input=user_input)
+                    if _opt_result.get("success") and _opt_result.get("output", "").strip():
+                        print(f"\n  {DIM}{_opt_result['output'].strip()}{R}")
+            except Exception:
+                pass  # No crítico
+
         # ── Auto-pentest: detecta "hackea / escanea / pentest <url>" ───────────
         pt_match = _PENTEST_TRIGGER.search(user_input) if not _re_match else None
         if pt_match:
@@ -2700,9 +3119,9 @@ def main():
         for _ in range(max_rounds):
             try:
                 with Spinner():
-                    response = call_ollama(model, conversation)
+                    response = call_llm(model, conversation)
             except Exception as e:
-                print(f"\n{RED}  ✗ Error Ollama: {e}{R}")
+                print(f"\n{RED}  ✗ Error {_backend_display_name()}: {e}{R}")
                 break
 
             thinking      = response.get("thinking", "")
@@ -3054,6 +3473,71 @@ def main():
                     url  = f.get("matched-at", "?")
                     col  = SEV_COLOR.get(sev, WHITE)
                     print(f"  {col}[{sev}]{R} {name} → {DIM}{url}{R}")
+
+            # ── Auto-classificación de hallazgos con Ollama ──────────────────
+            _auto_classify = (
+                session_config.get("auto_classify", True)
+                and _SKILLS_AVAILABLE
+                and bool(all_nuclei_finds or
+                         any(f.get("severity") in ("critical", "high")
+                             for e in all_output
+                             for f in (e.get("findings", []) if isinstance(e, dict) else [])))
+            )
+            if _auto_classify:
+                # Reunir findings de esta ronda para clasificar
+                _round_text_parts = []
+                for _e in all_output:
+                    if isinstance(_e, dict):
+                        _c = _e.get("stdout", "")
+                        if _c:
+                            _round_text_parts.append(_c[:5000])
+                _round_text = "\n\n".join(_round_text_parts)
+                if _round_text and len(_round_text) > 200:
+                    _classify_logged = False
+                    try:
+                        _cr = run_skill("vuln_classifier", input=_round_text[:25000], source="auto", format="normal")
+                        if _cr.get("success"):
+                            _cf = _cr.get("findings", [])
+                            if _cf:
+                                _tps = sum(1 for f in _cf if f.get("verdict") == "TRUE_POSITIVE")
+                                _fps = sum(1 for f in _cf if f.get("verdict") == "FALSE_POSITIVE")
+                                _incs = sum(1 for f in _cf if f.get("verdict") == "INCONCLUSIVE")
+                                _risky_tp = [f for f in _cf
+                                             if f.get("verdict") == "TRUE_POSITIVE"
+                                             and f.get("severity") in ("critical", "high")]
+                                print(f"\n  {MAGENTA}{BOLD}🔬 AUTO-CLASSIFY:{R} "
+                                      f"{GREEN}{_tps} TP{R} / {YELLOW}{_fps} FP{R} / "
+                                      f"{DIM}{_incs} inconclusos{R}")
+                                if _risky_tp:
+                                    print(f"  {RED}{BOLD}⚠ {len(_risky_tp)} vulnerabilidad(es) confirmada(s):{R}")
+                                    for _rtp in _risky_tp[:5]:
+                                        print(f"    {RED}[{_rtp.get('severity','?').upper()}]{R} "
+                                              f"{_rtp.get('value','?')}")
+                                # Ingerir findings clasificados
+                                project_state.ingest_skill_findings("vuln_classifier_auto", _cf)
+                                project_state.save()
+                                _classify_logged = True
+                                # Añadir resumen al output para el modelo
+                                _classify_summary = (
+                                    f"\n[AUTO-CLASSIFY: {_tps} TP, {_fps} FP, {_incs} inconclusos"
+                                    f" — Riesgo: {_cr.get('classifier_summary', {}).get('risk_assessment', '?')}]\n"
+                                )
+                                # Agregar al resultado para el modelo
+                                if _tps > 0:
+                                    _tp_details = "\n".join(
+                                        f"  ✓ CONFIRMADO: {f.get('value','?')} [{f.get('severity','?')}]"
+                                        for f in _cf if f.get("verdict") == "TRUE_POSITIVE"
+                                    )
+                                    _classify_summary += f"TRUE POSITIVES:\n{_tp_details}\n"
+                                if _fps > 0:
+                                    _fp_details = "\n".join(
+                                        f"  ✗ FALSO: {f.get('value','?')} — {f.get('description','?')[:80]}"
+                                        for f in _cf if f.get("verdict") == "FALSE_POSITIVE"
+                                    )
+                                    _classify_summary += f"FALSE POSITIVES:\n{_fp_details}\n"
+                                result_summary += _classify_summary
+                    except Exception:
+                        pass
 
             result_summary = json.dumps(all_output, ensure_ascii=False)
             if fetch_result_text:

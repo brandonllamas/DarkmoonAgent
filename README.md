@@ -1,188 +1,717 @@
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,2,5,20,30&height=230&section=header&text=HackerAgent&fontSize=82&fontColor=ffffff&animation=fadeIn&fontAlignY=36&desc=Agente%20de%20IA%20para%20Pentesting%20%7C%20AD%20Audit%20%7C%20Web%20UI&descSize=18&descAlignY=58" width="100%"/>
+<!-- BANNER ANIMADO CON ONDAS -->
+<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,2,5,20,30&height=280&section=header&text=HackerAgent&fontSize=82&fontColor=ffffff&animation=fadeIn&fontAlignY=32&desc=🤖%20IA%20Local%20·%20Pentesting%20·%20AD%20Audit%20·%20RE%20·%20OSINT%20·%20Web%20UI&descSize=16&descAlignY=56" width="100%"/>
 
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=22&duration=3200&pause=700&color=F7768E&center=true&vCenter=true&width=820&height=48&lines=Pentesting+web+din%C3%A1mico+%2B+SQLi;Audit%C3%ADa+Active+Directory+en+segundos;Interfaz+web+%E2%80%94+python+agent.py+--web;Ingenier%C3%ADa+inversa+%2B+bypass+de+login;100%25+local+%C2%B7+multi-agente+%C2%B7+sin+nube" alt="typing"/>
+<!-- TYPING SVG ANIMADO -->
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=24&duration=2800&pause=600&color=F7768E&center=true&vCenter=true&width=860&height=60&lines=Pentesting+web+din%C3%A1mico+%2B+SQLi+autom%C3%A1tico;Auditor%C3%ADa+Active+Directory+en+segundos;Interfaz+web+SPA+—+python+agent.py+--web;Ingenier%C3%ADa+inversa+%2B+bypass+de+login+automatico;Fuzzing+inteligente+multi-herramienta;Auto-instalaci%C3%B3n+de+37+herramientas;100%25+local+·+multi-agente+·+sin+nube;Optimizaci%C3%B3n+autom%C3%A1tica+del+LLM" alt="typing"/>
+
+<!-- BADGES ANIMADOS -->
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e"/>
+  <img src="https://img.shields.io/badge/Ollama-local-000000?style=for-the-badge&logo=ollama&logoColor=white&labelColor=1a1a2e"/>
+  <img src="https://img.shields.io/badge/Web_UI-Flask-000000?style=for-the-badge&logo=flask&logoColor=white&labelColor=1a1a2e"/>
+  <img src="https://img.shields.io/badge/Kali_Linux-557C94?style=for-the-badge&logo=kalilinux&logoColor=white&labelColor=1a1a2e"/>
+  <img src="https://img.shields.io/badge/skills-42-F7768E?style=for-the-badge&labelColor=1a1a2e"/>
+  <img src="https://img.shields.io/badge/multi--agente-SubAgents-BB9AF7?style=for-the-badge&labelColor=1a1a2e"/>
+  <img src="https://img.shields.io/badge/license-MIT-9ECE6A?style=for-the-badge&labelColor=1a1a2e"/>
+  <img src="https://img.shields.io/badge/auto--install-37+tools-3DBA6F?style=for-the-badge&labelColor=1a1a2e"/>
+  <img src="https://img.shields.io/badge/auto--optimize-LLM-FF6B6B?style=for-the-badge&labelColor=1a1a2e"/>
+</p>
+
+### 🧠 42 skills · 🌐 Web UI dinámica · 🔬 RE + bypass · 🕸️ Fuzzing · 🔑 Credential Intel · 🛠️ Dev · ⚡ Auto-optimize
+
+</div>
 
 <br/>
 
-![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![Ollama](https://img.shields.io/badge/Ollama-local-000000?style=for-the-badge&logo=ollama&logoColor=white)
-![Flask](https://img.shields.io/badge/Web_UI-Flask-000000?style=for-the-badge&logo=flask&logoColor=white)
-![Kali](https://img.shields.io/badge/Kali_Linux-557C94?style=for-the-badge&logo=kalilinux&logoColor=white)
-![Skills](https://img.shields.io/badge/skills-24-F7768E?style=for-the-badge)
-![Multiagente](https://img.shields.io/badge/multi--agente-SubAgents-BB9AF7?style=for-the-badge)
-![License](https://img.shields.io/badge/license-MIT-9ECE6A?style=for-the-badge)
-
-</div>
-
-<div align="center">
-
-### 🧠 IA local (Ollama) · ⚡ 24 skills · 🌐 Web UI · 🔬 RE + bypass · 🕸️ web dinámico · 🔑 credential intel · 🛠️ dev de código
-
-</div>
-
-> ### ⚠️ AVISO LEGAL
-> Uso **exclusivo** en sistemas con **autorización expresa y por escrito** del propietario.
-> El uso no autorizado es delito · *Art. 197 bis CP (España)* · *CFAA (USA)* · *Ley 1273 (Colombia)*.
+> ## ⚠️ AVISO LEGAL
+> **Uso EXCLUSIVO** en sistemas con **autorización expresa y por escrito** del propietario.
+> El uso no autorizado es delito · *Art. 197 bis CP (España)* · *CFAA (USA)* · *Ley 1273 (Colombia)* · *Código Penal (México)*
+>
 > **Audita solo lo que te pertenece o tienes permiso de auditar.**
 
+<br/>
+
 ---
 
-## ✨ ¿Qué es?
+## ✨ ¿Qué es HackerAgent?
 
-**HackerAgent** es un agente de terminal/web que orquesta **modelos locales de Ollama** para hacer pentesting, ingeniería inversa, **auditoría de Active Directory** y desarrollo de herramientas ofensivas — **sin enviar nada a la nube**. Tú describes el objetivo en lenguaje natural (o desde el navegador con la nueva **Web UI**) y el agente ejecuta los *skills* adecuados, analiza los resultados con **sub-agentes en paralelo** y te entrega hallazgos, PoCs, binarios bypasseados o código, todo organizado por proyecto.
+**HackerAgent** es un **agente autónomo de ciberseguridad** impulsado por IA local (Ollama/LM Studio). Orquesta **42 skills especializados** para realizar pentesting web, auditoría de Active Directory, ingeniería inversa, fuzzing inteligente, OSINT, desarrollo de herramientas ofensivas y más — **todo 100% local, sin enviar nada a la nube**.
+
+Tú describes el objetivo en **lenguaje natural** (o desde la **Web UI**) y el agente:
+1. 🧠 **Detecta automáticamente** el tipo de tarea
+2. 🔧 **Optimiza el LLM** con los parámetros ideales
+3. ⚡ **Ejecuta skills** con sub-agentes en paralelo
+4. 🎯 **Clasifica hallazgos** como TP/FP con IA
+5. 📊 **Persiste todo** por proyecto con dashboard web
 
 <div align="center">
 
-| 🎯 | Capacidad | 
-|:---:|:---|
-| 🕸️ | **Pentest web dinámico** — crawlea y prueba SQLi / XSS / LFI / redirect / cmdi en vivo |
-| 💉 | **SQL injection** — detecta y **extrae** datos con sqlmap (o fallback manual) |
-| 🔑 | **Credential intel** — descarga credenciales filtradas (WhiteIntel) y las **prueba** contra el login |
-| 🔬 | **Ingeniería inversa** — scripts, binarios y KeyAuth; bypass de login con **log en vivo** |
-| 🛠️ | **Desarrollo de código** — genera payloads/malware/exploits con el mejor modelo local |
-| 🤖 | **Multi-agente** — cada skill lanza un SubAgent que analiza en paralelo con contexto propio |
-| 💾 | **Persistencia** — dominios, hallazgos y sesiones se acumulan por proyecto |
-| 📊 | **Reportes** — HTML dark-theme con gráficos + Markdown |
-| 🌐 | **Web UI** — interfaz gráfica con chat, proyectos, skills y dashboard de vulnerabilidades |
-| 🔭 | **Shodan Hunt** — busca cámaras, routers, PLCs, bases de datos expuestas y encadena exploits automáticamente |
-| 💣 | **Exploit-DB** — `searchsploit` local + exploit-db.com; sugiere módulos Metasploit por CVE/producto |
-| 🏢 | **AD Audit** — escanea DCs y audita LDAP, SMB, Kerberos y más |
+| 🎯 | Capacidad | Detalle |
+|:---:|:---------|:--------|
+| 🕸️ | **Pentest web dinámico** | Crawlea y prueba SQLi / XSS / LFI / redirect / cmdi en vivo |
+| 💉 | **SQL injection automática** | Detecta y **extrae** bases de datos con sqlmap |
+| 🔑 | **Credential intelligence** | Descarga creds de stealer logs (WhiteIntel) y las **prueba** contra el login |
+| 🔬 | **Ingeniería inversa** | Scripts, binarios ELF/PE y KeyAuth; bypass de login automático |
+| 🌐 | **Fuzzing inteligente** | ffuf · feroxbuster · gobuster · wfuzz con auto-wordlist |
+| 🎯 | **Clasificador TP/FP** | Distingue vulnerabilidades reales de falsos positivos con IA |
+| 🤖 | **Auto-optimización LLM** | Ajusta temperatura/contexto según la tarea detectada |
+| 🏢 | **AD Audit** | LDAP anónimo, SMB signing, Kerberos, Global Catalog |
+| 🔭 | **Shodan Hunt** | Busca dispositivos por tipo (40+ presets), cruza CVEs con exploits |
+| 💣 | **Exploit-DB** | searchsploit + web; genera comandos Metasploit |
+| 🛠️ | **Desarrollo de código** | Payloads, malware, exploits con toolchain completo |
+| 📱 | **Pentesting móvil** | APK análisis estático + Frida dinámico |
+| 🕵️ | **OSINT completo** | 10 skills: emails, breaches, DNS, redes, teléfonos, metadata |
+| ⚡ | **Auto-instalación** | 37 herramientas se instalan solas si faltan |
+| 🌐 | **Web UI** | SPA con chat, proyectos, dashboard, exportación, tools panel |
 
 </div>
-
----
-
-## 🌐 Web UI — `python agent.py --web`
-
-> **NUEVO** — Interfaz web completa y animada tipo SPA (Single Page Application) sin dependencias complejas (Flask se encarga del backend). Diseñada con estética premium oscura, *glassmorphism* y animaciones dinámicas.
-
-```bash
-python agent.py --web              # http://127.0.0.1:7860 (abre navegador automáticamente)
-python agent.py --web --port 8080  # puerto personalizado
-python agent.py --web --host 0.0.0.0 --port 7860  # accesible desde la LAN
-```
-
-<div align="center">
-
-| Feature | Descripción |
-|:--------|:------------|
-| ✨ **Diseño Animado** | Fondo dinámico de partículas, efectos *glassmorphism* y micro-animaciones fluidas |
-| 💬 **Chat interactivo** | Streaming token a token, avatares, modo "pensando..." (thinking block) y renderizado de Markdown/Código |
-| 📁 **Multi-proyecto** | Crea proyectos (especificando carpeta destino custom), gestione desde el panel lateral izquierdo |
-| 🗨️ **Multi-chat** | Múltiples sesiones paralelas por proyecto, historial persistente y selector rápido |
-| ⚙️ **Panel de Skills** | Toggle visual para encender/apagar skills (Active Directory, Vuln Scans, etc) al vuelo |
-| 📊 **Dashboard Visual** | Panel con tarjetas de severidad coloreadas, contador de vulnerabilidades, subdominios descubiertos e indicadores |
-| 📎 **Upload de archivos** | Sube múltiples archivos (arrastrando o seleccionando) que se inyectan en el contexto de Ollama |
-| 🤖 **Gestión de Modelos** | Selector de modelos locales en tiempo real con indicador de estado (Online/Offline) |
-| ⌨️ **Historial Ejecutable** | Visor de output crudo que recopila los comandos lanzados en la sesión actual |
-| ⚡ **Slash Command Menu** | Escribe `/` para abrir menú de 22+ comandos rápidos con filtrado y navegación por teclado |
-
-</div>
-
----
-
-## 🗺️ Cómo funciona
-
-```mermaid
-flowchart TD
-    A([python3 agent.py]) --> B{¿Modo?}
-    B -->|terminal| C[🗂️ Picker de proyectos]
-    B -->|--web| W[🌐 Web UI en http://127.0.0.1:7860]
-    C --> D[⚙️ Wizard: tipo · target · skills · agresividad]
-    W --> D2[🖱️ Crear/seleccionar proyecto en el navegador]
-    D --> E{¿Qué le pides?}
-    D2 --> E
-    E -->|hackea una url| F[🌐 Auto-pentest 4 fases]
-    E -->|bypass el login| G[🔬 Ing. inversa con log en vivo]
-    E -->|desarrolla X| H[🛠️ code_dev]
-    E -->|whiteintel y cred_stuff| I[🔑 Credenciales]
-    E -->|audita AD| J[🏢 ad_audit]
-    F --> S[🤖 SubAgents en paralelo]
-    G --> OUT2[binfinal y run_bypass.sh]
-    H --> OUT3[código en out/proyecto/dev/]
-    I --> S
-    J --> S
-    S --> R[💾 project_state.json + 📊 Dashboard Web]
-```
 
 ---
 
 ## 🚀 Instalación
 
-```bash
-# 1) Copiar el proyecto a la máquina (Kali recomendado)
-cd /opt && cp -r /media/sf_CarpetaCompartida/tools/HackerAgent . && cd HackerAgent
+<details>
+<summary><b>📦 Click para expandir — Instalación paso a paso</b></summary>
 
-# 2) Dependencias Python
+<br/>
+
+```bash
+# 1) Copiar el proyecto (Kali Linux recomendado)
+cd /opt
+cp -r /media/sf_CarpetaCompartida/tools/HackerAgent . && cd HackerAgent
+
+# 2) Dependencias Python mínimas
 pip3 install requests
 
-# 3) Ollama (local o en otra VM)
+# 3) Instalar Ollama (local o VM)
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull deepseek-r1:14b        # razonamiento / pentest
-ollama pull dolphin-mistral        # sin censura / desarrollo ofensivo
 
-# 4) Configurar .env  (ver abajo)
-nano .env
+# 4) Descargar modelos recomendados
+ollama pull deepseek-r1:14b        # Razonamiento / Pentest (recomendado)
+ollama pull dolphin-mistral        # Sin censura / Desarrollo ofensivo
+ollama pull qwen2.5-coder:7b       # Código / Scripts
 
-# 5) Ejecutar en modo terminal
-python3 agent.py
+# 5) Configurar .env
+cp .env.example .env 2>/dev/null || nano .env
+# Editar OLLAMA_URL si Ollama está en otra máquina
 
-# 6) Ejecutar en modo Web (Flask se instala automáticamente)
-python3 agent.py --web
+# 6) ¡Ejecutar!
+python3 agent.py                    # Modo terminal
+python3 agent.py --web              # Modo Web UI (http://127.0.0.1:7860)
 ```
+
+> ⚡ **Auto-instalación:** Al iniciar, HackerAgent verifica **37 herramientas** y las instala automáticamente si faltan (nmap, nuclei, ffuf, gobuster, subfinder, curl, etc.)
+
+</details>
+
+<br/>
 
 ---
 
 ## 🔧 Configuración — `.env`
 
 ```env
+# ── Backend LLM ──────────────────────────────────────────
 OLLAMA_URL="http://192.168.80.120:11434/api/chat"
+# LMSTUDIO_URL="http://localhost:1234/v1"
 
+# ── API keys (opcionales — los skills funcionan sin ellas) ──
 WPSCAN_API_KEY=""        # https://wpscan.com/api  (gratis, 25 req/día)
 SHODAN_API_KEY=""        # https://account.shodan.io
-VIRUSTOTAL_API_KEY=""    # https://www.virustotal.com/gui/user/apikey
-WHITEINTEL_API_KEY=""    # https://whiteintel.io  (stealer logs)
+VIRUSTOTAL_API_KEY=""    # https://virustotal.com
+WHITEINTEL_API_KEY=""    # https://whiteintel.io
+HIBP_API_KEY=""          # haveibeenpwned.com
+LEAKCHECK_API_KEY=""     # leakcheck.io
+DEHASHED_USER=""         # dehashed.com
+DEHASHED_API_KEY=""
+NUMVERIFY_API_KEY=""     # apilayer.net
+HUNTER_API_KEY=""        # hunter.io
+GITHUB_TOKEN=""          # github.com
 
+# ── Navegador para open_browser ──────────────────────────
 BROWSER="firefox"
 ```
 
-> Las API keys también se piden durante la sesión cuando hacen falta y se guardan solas en `.env`.
+> Las API keys se solicitan durante la sesión cuando son necesarias y se guardan automáticamente en `.env`.
+
+<br/>
 
 ---
 
-## 🧩 Skills (22)
+## 🌐 Web UI — `python agent.py --web`
+
+> Interfaz web SPA completa con **diseño premium oscuro**, streaming SSE en tiempo real y panel de control de herramientas.
+
+```bash
+python3 agent.py --web                   # http://127.0.0.1:7860
+python3 agent.py --web --port 8080       # Puerto personalizado
+python3 agent.py --web --host 0.0.0.0    # Accesible desde la LAN
+```
 
 <div align="center">
 
-| Skill | Categoría | Qué hace |
-|:------|:---------:|:---------|
-| `crtsh_enum` | 🔍 recon pasivo | Subdominios vía Certificate Transparency |
-| `google_dorks` | 🔍 recon pasivo | Google dorks de seguridad |
-| `shodan_query` | 🔍 recon pasivo | Shodan v2: host lookup + **hunt** por device_type (40+ presets) · CVE→MSF |
-| `subfinder_enum` | 🔍 recon pasivo | Subfinder + verificación HTTP (httpx) |
-| `whiteintel` | 🔍 recon pasivo | Descarga credenciales filtradas de stealer logs |
-| `whiteintel_num` | 🔍 recon pasivo | API WhiteIntel.io — consulta creds expuestas por dominio/empresa |
-| `gobuster_dir` | ⚡ recon activo | Fuzzing de directorios (auto-retry wildcard 403) |
-| `scan_red` | ⚡ recon activo | Nmap con clasificación de puertos críticos |
-| `nuclei_scan` | 🎯 vuln scan | Nuclei con auto-detección de templates + JSON |
-| `wpscan_run` | 🎯 vuln scan | WPScan con API key automática |
-| `sqli_scan` | 🎯 vuln scan | Detecta **y extrae** SQLi con sqlmap (+ fallback) |
-| `web_attack` | 🎯 vuln scan | Pentest web dinámico: SQLi/XSS/LFI/redirect/cmdi |
-| ✨ `exploit_db` | 🎯 vuln scan | Busca exploits en **Exploit-DB** (searchsploit + web) · genera comandos MSF |
-| ✨ `ad_audit` | 🎯 vuln scan | **AD Scanner**: LDAP anónimo, SMB signing, Kerberos, LDAPS, GC |
-| `spider_code` | 🔬 análisis | Spider HTML/JS: secretos, creds, source maps |
-| `web_code` | 🔬 análisis | Análisis profundo: framework, Firebase, endpoints, GraphQL |
-| `ing_inversa` | 🔬 ing. inversa | RE + bypass (scripts, binarios, carpetas, KeyAuth) |
-| `metasploit` | 💥 ataque | search / exploit / auxiliary / payload / scan |
-| `cred_stuff` | 💥 ataque | Prueba credenciales contra el login (bueno/malo) |
-| `apk_analyze` | 📱 móvil | RE estático de APK: manifest, secretos, lógica, SSL pinning |
-| `apk_dynamic` | 📱 móvil | Frida: bypass de SSL pinning + hooks de credenciales/cripto |
-| `model_advisor` | 🛠️ desarrollo | Recomienda modelo Ollama **+ prepara el toolchain** del lenguaje |
-| `code_dev` | 🛠️ desarrollo | Desarrolla código (pipenv + linters) → `out/<proj>/dev/` |
+| Feature | Descripción |
+|:--------|:------------|
+| ✨ **Diseño Animado** | Fondo con radial gradient ambient, glassmorphism, micro-animaciones |
+| 💬 **Chat interactivo** | Streaming SSE, thinking blocks colapsables, reveal secuencial |
+| 📁 **Multi-proyecto** | CRUD completo: crear, editar ✏️, eliminar 🗑️ proyectos |
+| 🗨️ **Multi-sesión** | Múltiples chats por proyecto, renombrar, exportar 📥 |
+| 📊 **Dashboard** | Tarjetas de severidad, tabla de hallazgos, lista de subdominios |
+| 🔧 **Panel Tools** | Estado de 37 herramientas, instalación con un clic, barra de progreso |
+| ⚙️ **Config LLM** | Selector de backend (Ollama/LM Studio), modelos, skills toggle |
+| ⌨️ **Slash Menu** | Escribe `/` para 22+ comandos rápidos con autocomplete |
+| 📎 **Upload archivos** | Arrastra y suelta archivos que se inyectan en el contexto |
+| 🔄 **Auto-reconexión** | Reanuda streams SSE si se pierde la conexión |
 
-<sub>✨ = nuevo en esta versión · Total: 24 skills</sub>
+</div>
+
+<br/>
+
+---
+
+## 🧩 Skills — 42 Skills en 10 categorías
+
+<details>
+<summary><b>🔍 RECONOCIMIENTO PASIVO (6 skills)</b></summary>
+<br/>
+
+| Skill | Descripción | Sintaxis |
+|:------|:------------|:---------|
+| `crtsh_enum` | Subdominios vía Certificate Transparency (crt.sh) | `SKILL:crtsh_enum domain=example.com` |
+| `subfinder_enum` | Subfinder + httpx verificación | `SKILL:subfinder_enum domain=x.com verify_http=true` |
+| `shodan_query` | Shodan v2: host lookup + hunt (40+ presets) · CVE→MSF | `SKILL:shodan_query device_type=camera country=MX` |
+| `google_dorks` | Google dorks de seguridad automatizados | `SKILL:google_dorks domain=example.com` |
+| `whiteintel` | Descarga credenciales filtradas (stealer logs) | `SKILL:whiteintel domain=example.com` |
+| `whiteintel_num` | API WhiteIntel.io v1 (Bearer token) | `SKILL:whiteintel_num target=example.com` |
+
+</details>
+
+<details>
+<summary><b>⚡ RECONOCIMIENTO ACTIVO (5 skills)</b></summary>
+<br/>
+
+| Skill | Descripción | Sintaxis |
+|:------|:------------|:---------|
+| `fuzzing_skill` | **Fuzzing multi-herramienta**: ffuf/feroxbuster/gobuster/wfuzz con auto-wordlist y detección de wildcard | `SKILL:fuzzing_skill target=https://x.com mode=dirs` |
+| `gobuster_dir` | Fuzzing de directorios (auto-retry wildcard 403) | `SKILL:gobuster_dir target=https://x.com` |
+| `scan_red` | Nmap con clasificación de puertos críticos | `SKILL:scan_red target=10.0.0.1 ports=top1000` |
+| `nuclei_scan` | Nuclei con auto-instalación de templates | `SKILL:nuclei_scan target=https://x.com severity=critical,high` |
+| `wpscan_run` | WPScan con API key automática | `SKILL:wpscan_run target=https://x.com` |
+
+</details>
+
+<details>
+<summary><b>🎯 ESCANEO DE VULNERABILIDADES (5 skills)</b></summary>
+<br/>
+
+| Skill | Descripción | Sintaxis |
+|:------|:------------|:---------|
+| `sqli_scan` | SQLi con sqlmap + dump automático | `SKILL:sqli_scan target='https://x.com?id=1' dump=true` |
+| `web_attack` | Pentest web dinámico: SQLi/XSS/LFI/redirect/cmdi | `SKILL:web_attack target=https://x.com tests=sqli,xss` |
+| `exploit_db` | Busca exploits en Exploit-DB (searchsploit + web) | `SKILL:exploit_db cve=CVE-2021-36260` |
+| `metasploit` | search/exploit/auxiliary/payload/scan | `SKILL:metasploit mode=search cve=CVE-2017-0144` |
+| `ad_audit` | **AD Scanner**: LDAP anónimo, SMB, Kerberos, GC | `SKILL:ad_audit target=corp.local` |
+
+</details>
+
+<details>
+<summary><b>🔬 ANÁLISIS DE CÓDIGO (3 skills)</b></summary>
+<br/>
+
+| Skill | Descripción | Sintaxis |
+|:------|:------------|:---------|
+| `spider_code` | Spider HTML/JS: secretos, creds, source maps | `SKILL:spider_code target=https://x.com` |
+| `web_code` | Análisis profundo: framework, Firebase, endpoints | `SKILL:web_code target=https://x.com` |
+| `vuln_classifier` | **Clasifica hallazgos como TP/FP** usando IA local | `SKILL:vuln_classifier input="SQLi en login.php"` |
+
+</details>
+
+<details>
+<summary><b>🔬 INGENIERÍA INVERSA (1 skill)</b></summary>
+<br/>
+
+| Skill | Descripción | Sintaxis |
+|:------|:------------|:---------|
+| `ing_inversa` | RE + bypass de scripts/binarios/carpetas/KeyAuth con log en vivo. Parchea condicionales, LD_PRELOAD, r2 patch, shim KeyAuth + Frida | `bypass el login de /ruta/bin` |
+
+</details>
+
+<details>
+<summary><b>💥 ATAQUE / EXPLOTACIÓN (2 skills)</b></summary>
+<br/>
+
+| Skill | Descripción | Sintaxis |
+|:------|:------------|:---------|
+| `metasploit` | Búsqueda de módulos y ejecución de exploits | `SKILL:metasploit mode=exploit target=10.0.0.1 module=...` |
+| `cred_stuff` | Prueba credenciales contra login (bueno/malo) | `SKILL:cred_stuff target=https://x.com/login creds="user:pass"` |
+
+</details>
+
+<details>
+<summary><b>📱 PENTESTING MÓVIL / APK (2 skills)</b></summary>
+<br/>
+
+| Skill | Descripción | Sintaxis |
+|:------|:------------|:---------|
+| `apk_analyze` | RE estático: manifest, secretos, lógica, SSL pinning | `SKILL:apk_analyze target=/ruta/app.apk` |
+| `apk_dynamic` | Frida: bypass SSL pinning + hooks | `SKILL:apk_dynamic action=ssl-unpin target=com.app` |
+
+</details>
+
+<details>
+<summary><b>🕵️ OSINT / INTELIGENCIA (10 skills)</b></summary>
+<br/>
+
+| Skill | Descripción | Sintaxis |
+|:------|:------------|:---------|
+| `theharvester` | Emails, subdominios, hosts desde 15+ fuentes | `SKILL:theharvester domain=x.com sources=google,bing` |
+| `sherlock_osint` | Username OSINT en 400+ plataformas | `SKILL:sherlock_osint username=johndoe` |
+| `email_osint` | Holehe, HIBP, Gravatar, MX, Hunter.io | `SKILL:email_osint email=john@x.com` |
+| `breach_search` | Breaches: HIBP, DeHashed, LeakCheck, IntelX | `SKILL:breach_search email=john@x.com` |
+| `dns_full` | DNS completo: AXFR, SPF/DMARC, brute-force | `SKILL:dns_full domain=x.com` |
+| `metadata_osint` | ExifTool + Metagoofil en documentos | `SKILL:metadata_osint domain=x.com` |
+| `phone_osint` | PhoneInfoga, NumVerify, CNAM, carrier | `SKILL:phone_osint phone=+521234567890` |
+| `wayback_osint` | Wayback Machine CDX: URLs históricas, secretos JS | `SKILL:wayback_osint domain=x.com` |
+| `recon_ng_osint` | Recon-ng + WHOIS, DNS brute, HackerTarget | `SKILL:recon_ng_osint domain=x.com` |
+| `social_osint` | Reddit, GitHub secretos, Pastebin | `SKILL:social_osint company=Acme` |
+
+</details>
+
+<details>
+<summary><b>🛠️ DESARROLLO DE CÓDIGO / MALWARE (8 skills)</b></summary>
+<br/>
+
+| Skill | Descripción | Sintaxis |
+|:------|:------------|:---------|
+| `model_advisor` | Recomienda modelo Ollama + prepara toolchain | `SKILL:model_advisor kind=pentest language=python` |
+| `code_dev` | Desarrolla código con pipenv + linters | `SKILL:code_dev request="reverse shell" kind=payload` |
+| `tech_detect` | Detecta stack tecnológico (Firebase, DBs, auth) | `SKILL:tech_detect target=https://x.com` |
+| `evasion_dev` | Metodología AV/EDR: AMSI, ETW, syscalls | `SKILL:evasion_dev technique=amsi_patch language=csharp` |
+| `ducky_dev` | Payloads Hak5: Rubber Ducky, Bash Bunny, O.MG | `SKILL:ducky_dev payload=win_reverse_shell lhost=10.0.0.1` |
+| `llm_optimizer` | **Optimiza el LLM**: benchmark, diagnóstico, auto-tune | `SKILL:llm_optimizer action=full_report` |
+| `prompt_engineer` | **Analiza y mejora** el system prompt | `SKILL:prompt_engineer action=analyze` |
+| `response_validator` | **Valida y corrige** JSON del LLM, puntúa calidad | `SKILL:response_validator action=quality_score json='{...}'` |
+| `auto_optimizer` | **Optimización automática** antes de cada instrucción | `SKILL:auto_optimizer action=setup` |
+
+</details>
+
+<br/>
+
+---
+
+## 🧠 Optimización de IA — 4 Skills nuevos
+
+<details>
+<summary><b>⚡ Click para expandir — Sistema completo de optimización del LLM</b></summary>
+<br/>
+
+HackerAgent incluye un **sistema completo de optimización de IA** que se ejecuta automáticamente:
+
+### 🔄 Auto-optimización (se ejecuta sola)
+
+Antes de cada instrucción del usuario, `auto_optimizer` detecta el tipo de tarea y ajusta el LLM:
+
+```
+Usuario: "hackea https://example.com"
+→ [auto-optimizer] PENTEST temp=0.08 ctx=32K
+
+Usuario: "bypass el login de /app"
+→ [auto-optimizer] RE temp=0.05 ctx=16K
+
+Usuario: "busca emails de example.com"
+→ [auto-optimizer] OSINT temp=0.10 ctx=16K
+```
+
+### Parámetros óptimos por tarea
+
+| Tarea | Temperatura | Contexto | Propósito |
+|-------|:-----------:|:--------:|-----------|
+| `pentest` | 0.08 | 32K | Precisión máxima para comandos |
+| `recon` | 0.05 | 16K | Muy determinista, rápido |
+| `exploit` | 0.15 | 32K | Ligeramente creativo |
+| `osint` | 0.10 | 16K | Balance precisión/descubrimiento |
+| `code` | 0.10 | 32K | Código limpio, sintaxis correcta |
+| `re` | 0.05 | 16K | Máxima precisión para RE |
+| `report` | 0.30 | 16K | Creativo para informes |
+
+### Skills de optimización disponibles
+
+```bash
+SKILL:llm_optimizer action=benchmark     # Prueba rendimiento del LLM
+SKILL:llm_optimizer action=diagnose      # Diagnostica problemas
+SKILL:llm_optimizer action=full_report   # Reporte completo
+SKILL:prompt_engineer action=analyze     # Analiza el system prompt
+SKILL:prompt_engineer action=optimize    # Mejora el prompt
+SKILL:prompt_engineer action=test        # Prueba variantes
+SKILL:response_validator action=validate # Valida JSON del LLM
+SKILL:response_validator action=fix      # Corrige JSON malformado
+SKILL:response_validator action=quality_score  # Puntúa calidad
+optimiza                                 # Trigger por lenguaje natural
+diagnostica                              # Trigger por lenguaje natural
+```
+
+</details>
+
+<br/>
+
+---
+
+## 🔧 Tool Manager — Auto-instalación de 37 herramientas
+
+<details>
+<summary><b>📦 Click para expandir — Herramientas que se instalan solas</b></summary>
+<br/>
+
+Al iniciar, HackerAgent verifica **37 herramientas** y las instala automáticamente si faltan:
+
+| Categoría | Herramientas |
+|:----------|:-------------|
+| 🔍 **Recon** | nmap, subfinder, httpx, amass, whatweb, wafw00f, dnsrecon, dnsx |
+| 🌐 **Web/Fuzzing** | ffuf, feroxbuster, gobuster, wfuzz, dirsearch, sqlmap, nikto |
+| 🎯 **Vulnerabilidades** | nuclei (+ templates), searchsploit, wpscan |
+| 💥 **Exploit** | metasploit, hydra, john, crackmapexec, netexec |
+| 🏢 **Active Directory** | enum4linux, ldap3 (Python), crackmapexec |
+| 🕵️ **OSINT** | theharvester, sherlock, holehe, metagoofil, exiftool, phoneinfoga, maigret |
+| 📱 **Móvil** | frida-tools, jadx, apktool |
+| 🔬 **Ing. Inversa** | radare2 |
+
+```bash
+# Ver estado de herramientas en la Web UI
+# Pestaña 🔧 Tools
+# O desde terminal:
+python3 -c "from tool_manager import scan_tools; print(scan_tools())"
+```
+
+</details>
+
+<br/>
+
+---
+
+## 🗺️ Arquitectura
+
+```mermaid
+flowchart TD
+    A([python3 agent.py]) --> B{¿Modo?}
+    B -->|terminal| C[🗂️ Picker de proyectos]
+    B -->|--web| W[🌐 Web UI en http://127.0.0.1:7860]
+    
+    C --> D[⚙️ Wizard: tipo · target · skills · agresividad]
+    D --> D2[🔧 Auto-install herramientas faltantes]
+    D2 --> D3[⚡ Auto-optimizer detecta tarea]
+    D3 --> E{¿Qué le pides?}
+    
+    W --> W2[🖱️ Crear/seleccionar proyecto]
+    W2 --> W3[💬 Chat interactivo SSE]
+    W3 --> D3
+    
+    E -->|hackea una url| F[🌐 Auto-pentest 4 fases]
+    E -->|bypass login| G[🔬 Ing. inversa automática]
+    E -->|desarrolla X| H[🛠️ code_dev]
+    E -->|credenciales| I[🔑 whiteintel + cred_stuff]
+    E -->|audita AD| J[🏢 ad_audit]
+    E -->|fuzzing| K[🌐 fuzzing_skill multi-herramienta]
+    E -->|clasifica| L[🎯 vuln_classifier TP/FP]
+    
+    F & I & J & K --> S[🤖 SubAgents en paralelo]
+    G --> OUT2[binfinal + run_bypass.sh]
+    H --> OUT3[código en out/proyecto/dev/]
+    L --> OUT4[✅TP / ❌FP clasificados]
+    
+    S --> R[💾 project_state.json]
+    R --> T[🔬 Auto-clasificar hallazgos]
+    T --> U[📊 Dashboard Web UI]
+    
+    style A fill:#1a1a2e,color:#fff
+    style W fill:#16213e,color:#fff
+    style D3 fill:#0f3460,color:#fff
+    style S fill:#533483,color:#fff
+    style R fill:#e94560,color:#fff
+```
+
+<br/>
+
+---
+
+## 🗣️ Lenguaje natural — Disparadores automáticos
+
+<div align="center">
+
+| Escribe… | Y el agente… |
+|:---------|:-------------|
+| `hackea https://ejemplo.com` | 🚀 **Auto-pentest** 4 fases + explotación |
+| `bypass el login de /ruta/bin` | 🔬 **Ing. inversa** con log en vivo → binfinal |
+| `créame un keylogger en python` | 🛠️ **code_dev** → `out/<proyecto>/dev/` |
+| `audita el servidor 10.10.0.5` | 🏢 **ad_audit** → escanea AD completo |
+| `clasifica <hallazgo>` | 🎯 **vuln_classifier** → TP o FP |
+| `optimiza` / `tunea` / `mejora` | ⚡ **llm_optimizer** → benchmark + auto-tune |
+| `diagnostica` / `revisa` | 🔍 Diagnóstico completo del LLM |
+| `clasifica /ruta/archivo.txt` | 📄 Clasifica hallazgos de un archivo |
+| `fuzzea https://ejemplo.com` | 🌐 **fuzzing_skill** con auto-detección |
+| `busca cámaras en México` | 📷 **shodan_query device_type=camera** |
+| `listame vulnerabilidades` | 📋 Parsea el log y numera las vulns |
+| `explotar <N>` | 💥 Crea PoC para la vulnerabilidad N |
+| `reporte` / `html` | 📊 Genera reporte HTML + Markdown |
+| `help` / `ayuda` / `?` | 📖 Muestra todo lo que puede hacer |
+
+</div>
+
+<br/>
+
+---
+
+## ⚡ Slash Commands (Web UI)
+
+Escribe `/` en el chat de la Web UI para desplegar el menú de comandos rápidos:
+
+```
+/hackea      → Auto-pentest completo
+/nuclei      → Escaneo de vulnerabilidades
+/shodan      → Consultar Shodan
+/cameras     → Buscar cámaras IP
+/fuzzing     → Fuzzing de directorios
+/sqli        → SQL injection automática
+/xss         → Prueba de XSS/LFI
+/wpscan      → Escaneo WordPress
+/exploitdb   → Buscar exploits
+/msf         → Metasploit
+/bypass      → Ingeniería inversa
+/ad          → Auditoría AD
+/apk         → Análisis de APK
+/whiteintel  → Credenciales filtradas
+/creds       → Probar credenciales
+/optimize    → Optimizar LLM
+/reporte     → Generar reporte
+/vulns       → Listar vulnerabilidades
+```
+
+<br/>
+
+---
+
+## 🏢 Active Directory Audit — `ad_audit`
+
+> Escaneo **paralelo** de DCs sin herramientas externas (solo Python + ldap3 auto-instalado).
+
+| Vector | Puerto | Técnica | Severidad si vulnerable |
+|:-------|:------:|:--------|:-----------------------:|
+| **LDAP Anonymous** | 389 | Bind + search sin credenciales | 🟠 Alto |
+| **LDAP Signing** | 389 | SIMPLE bind falso → código 8 vs 49 | 🟡 Medio |
+| **LDAPS Cert** | 636 | SSL handshake → cert validity | 🔵 Bajo |
+| **SMB Signing** | 445 | SMB2 NEGOTIATE raw socket | 🟠 Alto |
+| **SMB Null Session** | 445 | IPC$ connect | 🟠 Alto |
+| **Global Catalog** | 3268 | TCP open | ⚪ Info |
+| **Kerberos** | 88 | TCP connect | ⚪ Info |
+| **DNS SRV** | 53 | Auto-descubrimiento de DCs | ⚪ Info |
+
+```bash
+SKILL:ad_audit target=192.168.1.10
+SKILL:ad_audit target=corp.local
+SKILL:ad_audit target=10.10.0.0/24 timeout=2 threads=50
+```
+
+<br/>
+
+---
+
+## 🌐 Fuzzing Inteligente — `fuzzing_skill`
+
+> Fuzzing multi-herramienta con auto-detección. Elige automáticamente entre **ffuf > feroxbuster > gobuster > wfuzz**.
+
+| Modo | Comando |
+|:-----|:--------|
+| 📁 Directorios | `SKILL:fuzzing_skill target=https://x.com mode=dirs` |
+| 🔁 Recursivo | `SKILL:fuzzing_skill target=https://x.com mode=recursive` |
+| 🔍 Parámetros | `SKILL:fuzzing_skill target=https://x.com/page.php mode=params` |
+| 🌐 Subdominios | `SKILL:fuzzing_skill target=https://x.com mode=subs` |
+| 🎯 Valores | `SKILL:fuzzing_skill target=https://x.com/login mode=values param=user` |
+| 📄 Extensiones | `SKILL:fuzzing_skill target=https://x.com mode=extensions` |
+
+Características:
+- 🛡️ **Detección de wildcard** automática (evita falsos positivos)
+- 📚 **Auto-wordlist**: SecLists → dirb → dirbuster → fallback inline
+- 🚀 **40+ subdominios** y **30+ parámetros** predefinidos
+
+<br/>
+
+---
+
+## 🎯 Clasificador TP/FP — `vuln_classifier`
+
+> Usa el LLM local para **distinguir vulnerabilidades reales de falsos positivos**.
+
+```
+🔴 [TRUE_POSITIVE]  HIGH  CVE-2021-44228 Log4Shell
+      Confianza : ▓▓▓▓▓▓▓▓▓░ 90%
+      Razon     : Log4J JNDI con payload confirmado en /api/log
+
+✅ [FALSE_POSITIVE]  INFO  WordPress Version 6.4 detected
+      Confianza : ▓▓▓▓▓▓▓░░░ 70%
+      Razon     : Solo detección de versión, sin CVE asociado
+```
+
+```bash
+SKILL:vuln_classifier input="SQLi en login.php" source=web_attack
+SKILL:vuln_classifier file=/tmp/nuclei_out.json source=nuclei
+clasifica        → Clasifica todo el log de la sesión
+clasifica <texto> → Clasifica un hallazgo específico
+```
+
+<br/>
+
+---
+
+## 🔭 Shodan Hunt + Exploit-DB — Cadena de ataque
+
+```bash
+# 1. Buscar dispositivos vulnerables
+SKILL:shodan_query device_type=hikvision country=MX limit=20
+
+# 2. Buscar exploit para el CVE encontrado
+SKILL:exploit_db cve=CVE-2021-36260
+
+# 3. ¡Explotar!
+SKILL:metasploit mode=exploit target=<ip> module=exploit/linux/http/hikvision_cmd_injection lhost=<lhost>
+```
+
+| Preset `device_type` | Categoría | Puertos |
+|:---------------------|:---------:|:--------|
+| `camera` · `hikvision` · `dahua` | 📷 Cámaras | 554, 80, 443 |
+| `router` · `mikrotik` · `cisco` | 🌐 Redes | 22, 23, 80, 443 |
+| `industrial` · `scada` · `plc` | 🏭 OT/ICS | 102, 502 |
+| `mongodb` · `redis` · `elasticsearch` | 🗄️ DBs | 27017, 6379, 9200 |
+| `rdp` · `vnc` · `telnet` | 💻 Remoto | 3389, 5900, 23 |
+| `jenkins` · `wordpress` | 🔑 Paneles | 8080, 80, 443 |
+
+<br/>
+
+---
+
+## 📁 Estructura de salida en disco
+
+```text
+out/
+└── mi_proyecto/
+    ├── project_state.json              ← Dominios + hallazgos (acumulado)
+    ├── scan_cache.json                 ← Cache 24h por comando
+    ├── session_YYYYMMDD_HHMMSS.json    ← Conversación completa
+    ├── session_YYYYMMDD_HHMMSS.md      ← Log en tiempo real
+    ├── session_*_report.html           ← Reporte HTML dark-theme
+    ├── session_*_report.md             ← Reporte Markdown
+    ├── session_*.events.jsonl          ← Eventos del chat (para Web UI)
+    ├── uploads/                        ← Archivos subidos
+    ├── credentials/                    ← Credenciales filtradas
+    │   └── whiteintel_<dominio>.json
+    └── dev/                            ← Código generado
+        └── ducky/                      ← Payloads Hak5
+
+out_re/
+└── <binario>_TS/
+    ├── binfinal                        ← Binario bypasseado
+    ├── run_bypass.sh                   ← Script de ejecución
+    ├── frida_bypass.js                 ← Script Frida (KeyAuth online)
+    └── keyauth_shim/                   ← Shim para KeyAuth
+```
+
+<br/>
+
+---
+
+## 🤖 Modelos recomendados
+
+<div align="center">
+
+| Modelo | RAM | Velocidad | Ideal para |
+|:-------|:---:|:---------:|:-----------|
+| ⭐ `deepseek-r1:14b` | 16 GB | ★★★☆ | **RECOMENDADO** — razonamiento + pentest |
+| 🏆 `deepseek-r1:32b` | 32 GB | ★★★☆ | Máxima profundidad de análisis |
+| 🐬 `dolphin-mistral` | 8 GB | ★★★★ | Sin censura, desarrollo ofensivo |
+| 👨‍💻 `qwen2.5-coder:7b` | 8 GB | ★★★★ | Código, scripts, toolchain |
+
+</div>
+
+> `model_advisor` inspecciona tu Ollama y recomienda el modelo ideal según la tarea.
+
+<br/>
+
+---
+
+## 💻 Modo terminal — Comandos de control
+
+```bash
+python3 agent.py                          # Inicio normal
+python3 agent.py --model deepseek-r1:14b  # Forzar modelo
+python3 agent.py --session mi_auditoria   # Cargar sesión legacy
+python3 agent.py --list-sessions          # Listar sesiones
+python3 agent.py --no-wizard              # Sin wizard
+python3 agent.py --backend ollama         # Forzar backend
+python3 agent.py --web                    # Web UI
+```
+
+<details>
+<summary><b>⌨️ Comandos dentro del agente</b></summary>
+
+<br/>
+
+| Comando | Acción |
+|:--------|:-------|
+| `help` / `ayuda` / `?` | Muestra todo lo que puede hacer |
+| `listame vulnerabilidades` | Parsea el log y lista vulns numeradas |
+| `explotar <N>` | Crea PoC para la vulnerabilidad N |
+| `reporte` / `html` | Genera reporte HTML + Markdown |
+| `apikeys` | Estado de las API keys |
+| `modelo <nombre>` | Cambia de modelo en caliente |
+| `backend [ollama/lmstudio]` | Cambia de backend LLM |
+| `sesiones` | Lista sesiones guardadas |
+| `sesion guardar/cargar <n>` | Guarda/reanuda sesión |
+| `cd <ruta>` | Cambia directorio de trabajo |
+| `salir` / `exit` | Guarda sesión y termina |
+
+</details>
+
+<br/>
+
+---
+
+## 🛡️ Robustez del agente
+
+| Mecanismo | Qué resuelve |
+|:----------|:-------------|
+| **Auto-SKILL mapping** | Convierte comandos crudos (`nuclei -u X`, `subfinder -d X`) a SKILL: automáticamente |
+| **Gobuster wildcard** | Si gobuster detecta wildcard 403, reintenta con `--wildcard` solo |
+| **Nuclei path fixer** | Corrige rutas relativas y flags inválidos (`-categories` → `-tags`) |
+| **JSON enforcer** | Si el modelo devuelve markdown en vez de JSON, reenvía con instrucción explícita |
+| **Hard truncate** | Si la compresión de contexto falla, descarta mensajes antiguos automáticamente |
+| **Circuit breaker** | Detecta y corta bucles de comandos repetidos (3+ iguales) |
+| **Scan cache 24h** | No re-escannea el mismo objetivo dentro de 24 horas |
+| **Auto-instalación** | 37 herramientas se instalan solas si faltan |
+| **Auto-clasificador** | Distingue TP/FP automáticamente después de cada skill |
+| **Push-back con ejemplos** | Cuando el modelo no emite comandos, le inyecta ejemplos SKILL: |
+| **SubAgents paralelos** | Cada skill lanza análisis en hilo aparte (contexto limpio, sin contaminación) |
+| **JSON fixer** | 8 estrategias para corregir JSON malformado del LLM |
+| **Quality scorer** | Puntúa la calidad de cada respuesta (0-100) |
+
+<br/>
+
+---
+
+<div align="center">
+
+## 📜 Licencia
+
+**MIT** — para pentesting autorizado, CTFs, laboratorios y formación en ciberseguridad.
+
+<br/>
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,2,5,20,30&height=150&section=footer&text=HackerAgent&fontSize=42&fontColor=ffffff&animation=twinkling" width="100%"/>
+
+<sub>🚀 **42 skills** · 🧠 IA local (Ollama) · 🌐 Web UI · 🔬 RE + bypass · 🕸️ Fuzzing · 🔑 Cred Intel</sub>
+<br/>
+<sub>⚡ Auto-install · 🤖 Auto-optimize · 🎯 TP/FP Classifier · 🏢 AD Audit · 🕵️ OSINT · 📱 Mobile</sub>
+<br/>
+<sub>Hecho para operar **100% local** · Powered by 🦙 Ollama · Úsalo con responsabilidad.</sub>
 
 </div>
 

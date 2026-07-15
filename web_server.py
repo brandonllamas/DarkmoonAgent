@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import database
 import os
 import queue
 import re
@@ -27,6 +28,78 @@ import uuid
 import mimetypes
 from datetime import datetime
 from pathlib import Path
+
+_ACTIVE_SESSIONS = {}
+
+# ── Persistent tool-event log ─────────────────────────────────────────────────
+# Events that should be persisted so they can be replayed when reloading a session
+_PERSIST_EVENT_TYPES = {
+    "thinking", "message",
+    "command_start", "command_done",
+    "skill_start", "skill_done",
+    "fetch_start", "fetch_done",
+    "file_ready", "new_findings",
+    "nuclei_findings", "vuln_indicators",
+    "error",
+}
+
+def _events_log_path(session_name: str, project_dir: Path) -> Path:
+    return project_dir / f"{session_name}.events.jsonl"
+
+def _load_events_log(session_name: str, project_dir: Path) -> list:
+    return database.get_events(session_name)
+
+def _append_event_log(session_name: str, project_dir: Path, event: dict):
+    if event.get("type") not in _PERSIST_EVENT_TYPES and event.get("type") != "user_turn":
+        return
+    database.append_event(session_name, event)
+
+
+class EventStreamer:
+    def __init__(self, session_name: str | None = None, project_dir: Path | None = None):
+        self.history = []
+        self.cond = threading.Condition()
+        self.is_done = False
+        self.session_name = session_name
+        self.project_dir = project_dir
+
+    def put(self, event):
+        with self.cond:
+            self.history.append(event)
+            if event.get("type") == "done" or event.get("type") == "error":
+                self.is_done = True
+            self.cond.notify_all()
+        # Persist tool events to disk for session history replay
+        if self.session_name and self.project_dir:
+            _append_event_log(self.session_name, self.project_dir, event)
+
+    def get_iterator(self, thread):
+        idx = 0
+        idle_ticks = 0
+        while True:
+            event = None
+            with self.cond:
+                if idx < len(self.history):
+                    event = self.history[idx]
+                    idx += 1
+                elif self.is_done:
+                    break
+                else:
+                    self.cond.wait(timeout=30)
+
+            if event:
+                idle_ticks = 0
+                yield event
+                if event.get("type") == "done" or event.get("type") == "error":
+                    break
+            else:
+                if not thread.is_alive():
+                    idle_ticks += 1
+                    if idle_ticks >= 2:
+                        yield {"type": "error", "content": "El proceso terminó sin respuesta"}
+                        break
+                yield None
+
 
 # ── Auto-install Flask ─────────────────────────────────────────────────────────
 def _ensure_flask():
@@ -58,8 +131,11 @@ _HERE = Path(__file__).parent
 sys.path.insert(0, str(_HERE))
 
 from agent import (
-    OLLAMA_URL, OUT_DIR, BASE_DIR,
-    call_ollama,
+    OLLAMA_URL, LMSTUDIO_URL, OUT_DIR, BASE_DIR,
+    LLM_BACKEND,
+    call_llm, call_ollama,
+    check_backend, check_ollama, check_lmstudio,
+    _backend_display_name, _backend_url,
     parse_skill_call,
     load_skills, skill_names,
     _skills_by_category, CATEGORY_LABELS, CATEGORY_ORDER,
@@ -68,7 +144,7 @@ from agent import (
     save_session, load_session_in_project, list_project_sessions,
     generate_session_name,
     ProjectState, LogWriter, ScanCache,
-    score_model, check_ollama,
+    score_model, 
     get_api_key,
     summarize_if_needed, CircuitBreaker,
     inject_nuclei_json, parse_nuclei_json, format_nuclei_findings,
@@ -79,7 +155,7 @@ from agent import (
     run_command as _agent_run_command,
     is_parallel_safe,
     run_skill as _run_skill,
-    get_model,
+    get_model, get_model_auto, get_model_lmstudio,
 )
 
 app = Flask(__name__)
@@ -94,45 +170,63 @@ def _sanitize(name: str) -> str:
 
 
 def _read_project_meta(project_dir: Path) -> dict:
-    f = project_dir / "project_state.json"
-    if not f.exists():
-        return {}
-    try:
-        return json.loads(f.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    p = database.get_project(project_dir.name)
+    if p:
+        p["findings"] = database.get_findings(project_dir.name)
+        p["sev_summary"] = database.get_severity_summary(project_dir.name)
+        return p
+    return {}
 
 
 def _list_projects() -> list[dict]:
     projects = []
-    if not OUT_DIR.exists():
-        return projects
-    for d in sorted(OUT_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-        if not d.is_dir():
-            continue
-        meta     = _read_project_meta(d)
-        sessions = list_project_sessions(d)
-        sev_s    = meta.get("sev_summary", {})
+    for p in database.get_all_projects():
+        pid = p["id"]
+        sessions = list_project_sessions(OUT_DIR / pid)
         projects.append({
-            "id":           d.name,
-            "name":         meta.get("project_name") or d.name,
-            "target":       meta.get("target", ""),
-            "path":         str(d),
+            "id":           pid,
+            "name":         p["name"],
+            "target":       p["target"],
+            "path":         str(OUT_DIR / pid),
             "sessions":     sessions,
-            "findings":     meta.get("findings", []),
-            "sev_summary":  sev_s,
-            "updated_at":   meta.get("updated_at", ""),
-            "project_type": meta.get("project_type", "full"),
+            "findings":     database.get_findings(pid),
+            "sev_summary":  database.get_severity_summary(pid),
+            "updated_at":   p["updated_at"],
+            "project_type": p["project_type"],
         })
     return projects
 
 
 def _get_or_create_model() -> tuple[str, list[str]]:
+    """Get a model safely, never crashing or returning 'unknown'."""
+    # Try the normal path first
     try:
-        model, models = get_model()
-        return model, models
-    except SystemExit:
-        return "unknown", []
+        model, models = get_model_auto()
+        if model and model != "unknown":
+            return model, models
+    except (SystemExit, Exception):
+        pass
+
+    # Fallback: query Ollama directly
+    try:
+        ok, models = check_ollama()
+        if ok and models:
+            # Pick best model by score
+            scored = sorted(models, key=lambda m: score_model(m)[0], reverse=True)
+            return scored[0], models
+    except Exception:
+        pass
+
+    # Fallback: try LM Studio
+    try:
+        ok, models = check_lmstudio()
+        if ok and models:
+            return models[0], models
+    except Exception:
+        pass
+
+    print("[web] ⚠ No se pudo obtener ningún modelo del backend")
+    return "unknown", []
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -153,7 +247,7 @@ def _process_chat_turn(
     commands/skills, and save the session.
     Emits dicts to event_queue for SSE streaming.
     """
-    eq = event_queue or queue.Queue()
+    eq = event_queue  # It's an EventStreamer now
 
     def emit(data: dict):
         eq.put(data)
@@ -171,7 +265,26 @@ def _process_chat_turn(
             }]
             saved_model = model
 
+        # Ensure session exists in database (for FOREIGN KEY constraints on events)
+        database.create_session(session_name, project_dir.name, saved_model or model)
+
         actual_model = saved_model or model
+        # If model is unknown, try to get a real one
+        if actual_model == "unknown" or not actual_model:
+            try:
+                ok, models = check_ollama()
+                if ok and models:
+                    actual_model = models[0]
+                else:
+                    ok2, models2 = check_lmstudio()
+                    if ok2 and models2:
+                        actual_model = models2[0]
+            except Exception:
+                pass
+            if actual_model == "unknown" or not actual_model:
+                emit({"type": "error", "content": "No hay modelos disponibles. Verifica Ollama/LM Studio."})
+                emit({"type": "done", "session": session_name})
+                return
 
         # Compose user content (include uploaded file if present)
         available_keys = {k: bool(get_api_key(k)) for k in [
@@ -235,6 +348,19 @@ def _process_chat_turn(
         _last_json_err = False  # track consecutive JSON parse errors
         _json_err_count = 0     # abort after 3 consecutive parse errors
 
+        # ── Auto-optimización antes de cada turno ────────────────────────────
+        try:
+            from agent import _SKILLS_AVAILABLE as _sk_avail
+            if _sk_avail:
+                # Detectar tarea y optimizar
+                _opt_input = user_message[:200]
+                _opt_result = _run_skill("auto_optimizer", action="auto", input=_opt_input)
+                if _opt_result.get("success") and _opt_result.get("output", "").strip():
+                    _opt_out = _opt_result["output"].strip()
+                    emit({"type": "status", "content": f"⚡ {_opt_out}"})
+        except Exception:
+            pass  # Auto-optimización no crítica
+
         for iteration in range(max_iters):
             # Summarize context if too large
             conversation = summarize_if_needed(actual_model, conversation)
@@ -260,21 +386,21 @@ def _process_chat_turn(
             # Call Ollama
             emit({"type": "status", "content": f"Consultando {actual_model}…"})
             try:
-                resp = call_ollama(actual_model, conversation)
+                resp = call_llm(actual_model, conversation)
             except Exception as e:
                 err_str = str(e)
                 if "400" in err_str or "context" in err_str.lower():
                     # Context overflow — truncate hard and retry once
                     from agent import _hard_truncate as _ht
-                    conversation = _ht(conversation, target_chars=10000)
+                    conversation = _ht(conversation, target_chars=5000)
                     emit({"type": "status", "content": "Contexto reducido, reintentando…"})
                     try:
-                        resp = call_ollama(actual_model, conversation)
+                        resp = call_llm(actual_model, conversation)
                     except Exception as e2:
-                        emit({"type": "error", "content": f"Error llamando a Ollama: {e2}"})
+                        emit({"type": "error", "content": f"Error {_backend_display_name()}: {e2}"})
                         break
                 else:
-                    emit({"type": "error", "content": f"Error llamando a Ollama: {e}"})
+                    emit({"type": "error", "content": f"Error {_backend_display_name()}: {e}"})
                     break
 
             _last_json_err = bool(resp.get("_json_parse_error"))
@@ -648,13 +774,47 @@ def api_create_project():
     })
 
 
+@app.route("/api/projects/<proj_id>", methods=["PUT"])
+def api_update_project(proj_id: str):
+    """Actualizar nombre/target/tipo de un proyecto."""
+    data = request.json or {}
+    name = data.get("name", "").strip()
+    target = data.get("target", "").strip()
+    project_type = data.get("project_type", "").strip()
+
+    if not name:
+        return jsonify({"error": "name required"}), 400
+
+    # Get current project
+    p = database.get_project(proj_id)
+    if not p:
+        return jsonify({"error": "project not found"}), 404
+
+    from agent import ProjectState as _PS
+    project_dir = OUT_DIR / proj_id
+    ps = _PS(project_dir, project_name=name, target=target or p.get("target", ""),
+             project_type=project_type or p.get("project_type", "full"))
+    ps.save()
+    return jsonify({
+        "id": proj_id,
+        "name": name,
+        "target": target or p.get("target", ""),
+        "project_type": project_type or p.get("project_type", "full"),
+    })
+
+
 @app.route("/api/projects/<proj_id>", methods=["DELETE"])
 def api_delete_project(proj_id: str):
+    """Eliminar un proyecto y todos sus datos."""
+    # Delete from database (cascade deletes sessions, messages, events, findings)
+    database.delete_project(proj_id)
+
+    # Also delete project directory and files
     project_dir = OUT_DIR / proj_id
-    if not project_dir.exists():
-        return jsonify({"error": "not found"}), 404
-    import shutil
-    shutil.rmtree(project_dir)
+    if project_dir.exists():
+        import shutil
+        shutil.rmtree(project_dir, ignore_errors=True)
+
     return jsonify({"deleted": proj_id})
 
 
@@ -671,23 +831,15 @@ def api_create_session(proj_id: str):
     project_dir = OUT_DIR / proj_id
     project_dir.mkdir(parents=True, exist_ok=True)
     sess_name = generate_session_name()
+    # Create the session in database so events/messages can reference it
+    database.create_session(sess_name, proj_id, "unknown")
     return jsonify({"session": sess_name})
 
 
 @app.route("/api/projects/<proj_id>/sessions/<sess_name>", methods=["DELETE"])
 def api_delete_session(proj_id: str, sess_name: str):
-    project_dir = OUT_DIR / proj_id
-    if not project_dir.exists():
-        return jsonify({"error": "project not found"}), 404
-    # Remove all files whose stem starts with sess_name (JSON, MD, report files)
-    deleted = []
-    for f in project_dir.iterdir():
-        if f.is_file() and f.stem.startswith(sess_name):
-            f.unlink()
-            deleted.append(f.name)
-    if not deleted:
-        return jsonify({"error": "session not found"}), 404
-    return jsonify({"deleted": deleted})
+    database.delete_session(sess_name)
+    return jsonify({"deleted": [sess_name]})
 
 
 @app.route("/api/projects/<proj_id>/sessions/<sess_name>/history", methods=["GET"])
@@ -701,74 +853,210 @@ def api_chat_history(proj_id: str, sess_name: str):
     return jsonify({"messages": messages, "model": model})
 
 
-@app.route("/api/projects/<proj_id>/sessions/<sess_name>/chat", methods=["POST"])
-def api_chat(proj_id: str, sess_name: str):
-    """SSE endpoint: streams agent events as text/event-stream."""
+@app.route("/api/projects/<proj_id>/sessions/<sess_name>/events", methods=["GET"])
+def api_session_events(proj_id: str, sess_name: str):
+    """Return the persisted SSE events log for a session (tool outputs, commands, skills)."""
+    project_dir = OUT_DIR / proj_id
+    events = _load_events_log(sess_name, project_dir)
+    return jsonify({"events": events})
+
+
+@app.route("/api/projects/<proj_id>/sessions/<sess_name>", methods=["PUT"])
+def api_rename_session(proj_id: str, sess_name: str):
     project_dir = OUT_DIR / proj_id
     if not project_dir.exists():
         return jsonify({"error": "project not found"}), 404
+        
+    data = request.json or {}
+    new_name = data.get("name", "").strip()
+    if not new_name:
+        return jsonify({"error": "new name required"}), 400
+        
+    # Validar nuevo nombre
+    safe_new_name = re.sub(r"[^\w\-]", "_", new_name.lower().replace(" ", "_"))[:40]
+    
+    # Check if target already exists
+    if (project_dir / f"{safe_new_name}.json").exists():
+        return jsonify({"error": "a session with that name already exists"}), 400
 
-    data           = request.json or {}
-    user_message   = data.get("message", "").strip()
-    model_req      = data.get("model", "")
-    enabled_skills = data.get("enabled_skills")
-    file_content   = data.get("file_content", "")
+    renamed = []
+    # Renombrar todos los archivos que empiezan por sess_name
+    for f in project_dir.iterdir():
+        if f.is_file() and f.name.startswith(sess_name):
+            new_filename = f.name.replace(sess_name, safe_new_name, 1)
+            new_path = project_dir / new_filename
+            f.rename(new_path)
+            renamed.append(new_filename)
+            
+            # Si es el json, actualizar la propiedad 'name' internamente
+            if new_path.suffix == ".json":
+                try:
+                    s_data = json.loads(new_path.read_text(encoding="utf-8"))
+                    s_data["name"] = safe_new_name
+                    new_path.write_text(json.dumps(s_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+                    
+    if not renamed:
+        return jsonify({"error": "session not found"}), 404
+        
+    return jsonify({"old_name": sess_name, "new_name": safe_new_name, "renamed": renamed})
 
-    if not user_message:
-        return jsonify({"error": "message required"}), 400
 
-    model, _ = _get_or_create_model()
-    if model_req:
-        model = model_req
+@app.route("/api/projects/<proj_id>/sessions/<sess_name>/export", methods=["GET"])
+def api_export_session(proj_id: str, sess_name: str):
+    """Exportar una sesión como archivo Markdown o JSON."""
+    project_dir = OUT_DIR / proj_id
+    fmt = request.args.get("format", "markdown").strip().lower()
 
-    eq = queue.Queue()
+    # Get conversation
+    conv, model, _ = load_session_in_project(sess_name, project_dir)
+    if conv is None:
+        return jsonify({"error": "session not found"}), 404
 
-    def _bg():
-        _process_chat_turn(
-            project_dir=project_dir,
-            session_name=sess_name,
-            user_message=user_message,
-            model=model,
-            enabled_skills=enabled_skills,
-            event_queue=eq,
-            uploaded_file_content=file_content,
+    # Get project info
+    p = database.get_project(proj_id) or {}
+    proj_name = p.get("name", proj_id)
+    proj_target = p.get("target", "")
+
+    if fmt == "json":
+        # Export as JSON
+        export = {
+            "project": proj_name,
+            "target": proj_target,
+            "session": sess_name,
+            "model": model,
+            "exported_at": datetime.now().isoformat(),
+            "messages": [
+                {"role": m["role"], "content": m["content"]}
+                for m in conv if m["role"] != "system"
+            ],
+        }
+        json_str = json.dumps(export, ensure_ascii=False, indent=2)
+        return Response(
+            json_str,
+            mimetype="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{sess_name}.json"',
+                "Content-Type": "application/json; charset=utf-8",
+            },
+        )
+    else:
+        # Export as Markdown
+        lines = [
+            f"# HackerAgent — Exportación de Sesión",
+            f"",
+            f"**Proyecto:** {proj_name}  ",
+            f"**Sesión:** {sess_name}  ",
+            f"**Target:** {proj_target or '—'}  ",
+            f"**Modelo:** {model or '—'}  ",
+            f"**Exportado:** {datetime.now():%Y-%m-%d %H:%M:%S}  ",
+            f"",
+            f"---",
+            f"",
+        ]
+        for m in conv:
+            if m["role"] == "system":
+                continue
+            role = "👤 **Usuario**" if m["role"] == "user" else "🤖 **HackerAgent**"
+            content = m.get("content", "")
+            # Try to pretty-print JSON content
+            try:
+                parsed = json.loads(content)
+                if isinstance(parsed, dict):
+                    content = f"```json\n{json.dumps(parsed, indent=2, ensure_ascii=False)}\n```"
+            except Exception:
+                pass
+            lines.append(f"### {role}")
+            lines.append(f"")
+            lines.append(content)
+            lines.append(f"")
+            lines.append(f"---")
+            lines.append(f"")
+
+        md_content = "\n".join(lines)
+        return Response(
+            md_content,
+            mimetype="text/markdown",
+            headers={
+                "Content-Disposition": f'attachment; filename="{sess_name}_export.md"',
+                "Content-Type": "text/markdown; charset=utf-8",
+            },
         )
 
-    t = threading.Thread(target=_bg, daemon=True)
-    t.start()
 
-    def generate():
-        # Poll queue in 30s slices; send keepalive comments so the browser
-        # doesn't close the SSE connection during long Ollama generations.
-        # Only give up if the background thread has died AND the queue is empty.
-        max_idle = 20  # 20 × 30s = 10 min idle max after thread dies
-        idle_ticks = 0
-        while True:
-            try:
-                event = eq.get(timeout=30)
-                idle_ticks = 0
-            except queue.Empty:
-                if not t.is_alive():
-                    idle_ticks += 1
-                    if idle_ticks >= 2:
-                        yield f"data: {json.dumps({'type': 'error', 'content': 'El proceso terminó sin respuesta'})}\n\n"
-                        break
-                # Thread still running or just finished — send keepalive comment
-                yield ": keepalive\n\n"
-                continue
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            if event.get("type") == "done":
-                break
+@app.route("/api/projects/<proj_id>/sessions/<sess_name>/chat", methods=["POST"])
+def api_chat(proj_id: str, sess_name: str):
+    """SSE endpoint: streams agent events as text/event-stream."""
+    try:
+        project_dir = OUT_DIR / proj_id
+        if not project_dir.exists():
+            return jsonify({"error": "project not found"}), 404
 
-    return Response(
-        generate(),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control":  "no-cache",
-            "X-Accel-Buffering": "no",
-            "Access-Control-Allow-Origin": "*",
-        },
-    )
+        data           = request.json or {}
+        user_message   = data.get("message", "").strip()
+        model_req      = data.get("model", "")
+        enabled_skills = data.get("enabled_skills")
+        file_content   = data.get("file_content", "")
+        reconnect      = data.get("reconnect", False)
+
+        session_key = (proj_id, sess_name)
+
+        if reconnect or (not user_message and session_key in _ACTIVE_SESSIONS):
+            if session_key not in _ACTIVE_SESSIONS:
+                return jsonify({"error": "no active session"}), 404
+            active = _ACTIVE_SESSIONS[session_key]
+            streamer = active["streamer"]
+            t = active["thread"]
+        else:
+            if not user_message:
+                return jsonify({"error": "message required"}), 400
+
+            model, _ = _get_or_create_model()
+            if model_req:
+                model = model_req
+
+            streamer = EventStreamer(session_name=sess_name, project_dir=project_dir)
+            _append_event_log(sess_name, project_dir, {"type": "user_turn", "content": user_message})
+
+            def _bg():
+                try:
+                    _process_chat_turn(
+                        project_dir=project_dir,
+                        session_name=sess_name,
+                        user_message=user_message,
+                        model=model,
+                        enabled_skills=enabled_skills,
+                        event_queue=streamer,
+                        uploaded_file_content=file_content,
+                    )
+                except Exception as e:
+                    streamer.put({"type": "error", "content": str(e)})
+
+            t = threading.Thread(target=_bg, daemon=True)
+            _ACTIVE_SESSIONS[session_key] = {"streamer": streamer, "thread": t}
+            t.start()
+
+        def generate():
+            for event in streamer.get_iterator(t):
+                if event is None:
+                    yield ": keepalive\n\n"
+                else:
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+        return Response(
+            generate(),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control":  "no-cache",
+                "X-Accel-Buffering": "no",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/projects/<proj_id>/state", methods=["GET"])
@@ -831,14 +1119,68 @@ def api_upload(proj_id: str, sess_name: str):
 
 @app.route("/api/models", methods=["GET"])
 def api_models():
-    ok, models = check_ollama()
+    import agent as _ag
+    backend = _ag.LLM_BACKEND
+    ok, models = check_backend()
     if not ok:
-        return jsonify({"available": False, "models": []})
+        return jsonify({"available": False, "models": [], "backend": backend})
     ranked = sorted(models, key=lambda m: score_model(m)[0], reverse=True)
     return jsonify({
         "available": True,
+        "backend":   backend,
+        "backend_name": _backend_display_name(),
         "models":    [{"name": m, "stars": score_model(m)[0], "desc": score_model(m)[1]}
                       for m in ranked],
+    })
+
+
+@app.route("/api/backends", methods=["GET"])
+def api_backends():
+    """Lista los backends disponibles con su estado online/offline."""
+    import agent as _ag
+    ollama_ok, ollama_models     = check_ollama()
+    lmstudio_ok, lmstudio_models = check_lmstudio()
+    return jsonify({
+        "active": _ag.LLM_BACKEND,
+        "backends": [
+            {
+                "id": "ollama",
+                "name": "Ollama",
+                "icon": "🦙",
+                "url": OLLAMA_URL,
+                "online": ollama_ok,
+                "model_count": len(ollama_models),
+            },
+            {
+                "id": "lmstudio",
+                "name": "LM Studio",
+                "icon": "🖥️",
+                "url": LMSTUDIO_URL,
+                "online": lmstudio_ok,
+                "model_count": len(lmstudio_models),
+            },
+        ]
+    })
+
+
+@app.route("/api/backend/switch", methods=["POST"])
+def api_switch_backend():
+    """Cambia el backend LLM activo."""
+    import agent as _ag
+    data = request.json or {}
+    new_backend = data.get("backend", "").strip().lower()
+    if new_backend not in ("ollama", "lmstudio"):
+        return jsonify({"error": "backend must be 'ollama' or 'lmstudio'"}), 400
+    _ag.LLM_BACKEND = new_backend
+    # Return the models for the new backend
+    ok, models = check_backend()
+    ranked = sorted(models, key=lambda m: score_model(m)[0], reverse=True) if ok else []
+    return jsonify({
+        "backend":      new_backend,
+        "backend_name": _ag.LLM_BACKEND and _backend_display_name(),
+        "available":    ok,
+        "models":       [{"name": m, "stars": score_model(m)[0], "desc": score_model(m)[1]}
+                         for m in ranked],
     })
 
 
@@ -858,21 +1200,74 @@ def api_generate_report(proj_id: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Tool Management API
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/tools/status", methods=["GET"])
+def api_tools_status():
+    """Return installation status of all known tools."""
+    try:
+        from tool_manager import scan_tools, get_tool_install_report
+        status = scan_tools()
+        html_report = get_tool_install_report()
+        installed = sum(1 for v in status.values() if v)
+        total = len(status)
+        return jsonify({
+            "tools": status,
+            "installed": installed,
+            "total": total,
+            "html_report": html_report,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "tools": {}, "installed": 0, "total": 0})
+
+
+@app.route("/api/tools/install", methods=["POST"])
+def api_tools_install():
+    """Install a specific tool by name."""
+    data = request.json or {}
+    tool_name = data.get("tool", "").strip().lower()
+    if not tool_name:
+        return jsonify({"error": "tool name required"}), 400
+    try:
+        from tool_manager import install_tool
+        ok = install_tool(tool_name)
+        return jsonify({"tool": tool_name, "success": ok})
+    except Exception as e:
+        return jsonify({"tool": tool_name, "success": False, "error": str(e)})
+
+
+@app.route("/api/tools/install-all", methods=["POST"])
+def api_tools_install_all():
+    """Install all missing tools (non-interactive)."""
+    try:
+        from tool_manager import install_missing_tools
+        results = install_missing_tools(interactive=False)
+        return jsonify({
+            "installed": {k: v for k, v in results.items() if v},
+            "failed": {k: v for k, v in results.items() if not v},
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/api/tools/update", methods=["POST"])
+def api_tools_update():
+    """Update nuclei templates and other updatable tools."""
+    try:
+        from tool_manager import update_all_tools
+        results = update_all_tools()
+        return jsonify({"results": results})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Main page (SPA)
 # ══════════════════════════════════════════════════════════════════════════════
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Main page (SPA)
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-# El HTML ahora se carga desde page/index.html
-
-
 
 @app.route("/")
 def index():
-    import os
     index_path = os.path.join(os.path.dirname(__file__), "page", "index.html")
     with open(index_path, "r", encoding="utf-8") as f:
         html_data = f.read()
@@ -886,6 +1281,23 @@ def index():
 def launch(host: str = "0.0.0.0", port: int = 7860, debug: bool = False):
     """Start the HackerAgent web server."""
     import socket
+    import agent as _ag
+
+    # Auto-detect backend
+    ollama_ok, ollama_models     = check_ollama()
+    lmstudio_ok, lmstudio_models = check_lmstudio()
+
+    if ollama_ok and not lmstudio_ok:
+        _ag.LLM_BACKEND = "ollama"
+    elif lmstudio_ok and not ollama_ok:
+        _ag.LLM_BACKEND = "lmstudio"
+    elif ollama_ok and lmstudio_ok:
+        _ag.LLM_BACKEND = "ollama"
+
+    backend_name = _backend_display_name()
+    ok, models = check_backend()
+    model_count = len(models) if ok else 0
+
     local_ip = "127.0.0.1"
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -895,20 +1307,21 @@ def launch(host: str = "0.0.0.0", port: int = 7860, debug: bool = False):
     except Exception:
         pass
 
-    print(f"\n{'='*56}")
-    print(f"  [WEB UI] HackerAgent")
-    print(f"{'-'*56}")
+    print()
+    print(f"  {'═' * 52}")
+    print(f"  🌐  HackerAgent Web UI")
+    print(f"  {'═' * 52}")
     print(f"  Local   :  http://127.0.0.1:{port}")
-    if host == "0.0.0.0":
-        print(f"  Network :  http://{local_ip}:{port}")
-    print(f"  Proyectos: {OUT_DIR}")
+    print(f"  Red     :  http://{local_ip}:{port}")
+    print(f"  Backend :  {backend_name} ({model_count} modelos)")
+    print(f"  {'─' * 52}")
     print(f"  Presiona Ctrl+C para detener")
-    print(f"{'='*56}\n")
-    # Open browser automatically
-    import threading as _t, webbrowser as _wb
-    def _open():
-        import time as _time; _time.sleep(1.2)
-        try:_wb.open(f"http://127.0.0.1:{port}")
-        except Exception:pass
-    _t.Thread(target=_open,daemon=True).start()
-    app.run(host=host, port=port, debug=debug, threaded=True, use_reloader=False)
+    print(f"  {'═' * 52}")
+    print()
+
+    app.run(host=host, port=port, debug=debug, threaded=True)
+
+
+if __name__ == "__main__":
+    launch()
+

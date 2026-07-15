@@ -18,6 +18,7 @@ HackerAgent/
 │   │   ├── cred_stuff.py           # Auditor de creds: lee expuestas, entiende login (HTML/JSON), veredicto bueno/malo
 │   │   ├── gobuster_dir.py         # Gobuster con manejo wildcard 403
 │   │   ├── google_dorks.py         # Google dorks de seguridad
+│   │   ├── vuln_classifier.py      # Clasificador TP/FP de hallazgos usando LLM local
 │   │   ├── metasploit.py           # Metasploit: search/exploit/auxiliary/payload/scan
 │   │   ├── nuclei_scan.py          # Nuclei con auto-detección de templates
 │   │   ├── scan_red.py             # Nmap con clasificación de puertos críticos
@@ -192,6 +193,9 @@ SKILL:ducky_dev payload=sharkjack_recon device=shark_jack lhost=10.10.14.1
 SKILL:ducky_dev request="keylogger con exfil por DNS" device=rubber_ducky os=windows lhost=10.10.14.1
 SKILL:ducky_dev request="exfiltrar archivos .kdbx de KeePass" device=bash_bunny os=windows
 SKILL:ducky_dev request="backdoor SSH en Linux sin sudo" device=omg_cable os=linux
+SKILL:vuln_classifier input="SQLi en login.php" source=web_attack
+SKILL:vuln_classifier file=/tmp/nuclei_out.json source=nuclei
+SKILL:vuln_classifier input="<texto>" format=verbose
 SKILL:apk_analyze target=/ruta/app.apk
 SKILL:apk_dynamic action=ssl-unpin target=com.ejemplo.app run=true
 SKILL:apk_dynamic action=hook target=com.ejemplo.app
@@ -246,6 +250,7 @@ def run(**kwargs) -> dict:
 
 | Skill | critical | high | medium | low | info |
 |-------|----------|------|--------|-----|------|
+| `vuln_classifier` | tp_confirmed (critical) | tp_confirmed (high) | tp_confirmed (medium) | tp_confirmed (low) | false_positive / inconclusive |
 | `nuclei_scan` | CVE crítico | CVE alto | CVE medio | — | tecnologías |
 | `wpscan_run` | — | CVEs | plugins/temas | — | versiones |
 | `shodan_query` | exploit_available (CVE+exploit) | cve_exposure / risky_port | device_found abierto | — | host info / device |
