@@ -5,12 +5,16 @@ Todos se instalan con: `ollama pull <nombre>`
 
 ---
 
+python3 agent.py --web --deepseek --verbose
+
 ## ⭐ Recomendados para Ingeniería Inversa (RE)
 
-### 1. deepseek-r1:14b  ← MEJOR OPCIÓN ACTUAL
+### 1. deepseek-r1:14b ← MEJOR OPCIÓN ACTUAL
+
 ```
 ollama pull deepseek-r1:14b
 ```
+
 - **Por qué**: Razonamiento paso a paso (chain-of-thought), excelente para analizar
   binarios, entender flujos de código y decidir técnicas de bypass.
 - **Censura**: Baja — tolera análisis de malware, exploits, RE de binarios protegidos.
@@ -20,9 +24,11 @@ ollama pull deepseek-r1:14b
 - **Uso en agente**: `python3 agent_ing.py --model deepseek-r1:14b`
 
 ### 2. deepseek-r1:32b
+
 ```
 ollama pull deepseek-r1:32b
 ```
+
 - **Por qué**: Versión grande de deepseek-r1. Mejor razonamiento sobre código complejo,
   Cython, PyInstaller, binarios obfuscados.
 - **Censura**: Baja — igual que 14b, muy permisivo con temas de seguridad.
@@ -32,9 +38,11 @@ ollama pull deepseek-r1:32b
 - **Uso en agente**: `python3 agent_ing.py --model deepseek-r1:32b`
 
 ### 3. deepseek-coder-v2:16b
+
 ```
 ollama pull deepseek-coder-v2:16b
 ```
+
 - **Por qué**: Entrenado específicamente en código. Entiende ASM, C, Python, Cython.
   Ideal para analizar output de r2/ghidra y generar patches precisos.
 - **Censura**: Muy baja — orientado a código, no tiene filtros de seguridad agresivos.
@@ -43,9 +51,11 @@ ollama pull deepseek-coder-v2:16b
 - **Velocidad**: Media
 
 ### 4. qwen2.5-coder:14b
+
 ```
 ollama pull qwen2.5-coder:14b
 ```
+
 - **Por qué**: Muy bueno para análisis de código, genera C/Python/bash correctos.
   Excelente para escribir el código de bypass (LD_PRELOAD, patches).
 - **Censura**: Baja-media — modelo chino, menos restricciones que modelos occidentales.
@@ -60,10 +70,12 @@ ollama pull qwen2.5-coder:14b
 Los modelos Dolphin son finetunings que eliminan el RLHF (filtros de seguridad).
 Son los más permisivos disponibles en Ollama.
 
-### 5. dolphin-mistral:latest  ← YA INSTALADO
+### 5. dolphin-mistral:latest ← YA INSTALADO
+
 ```
 ollama pull dolphin-mistral:latest
 ```
+
 - **Censura**: NINGUNA — sin filtros, responde cualquier consulta de RE/hacking/malware.
 - **Contexto**: 8192 tokens ⚠️ MUY PEQUEÑO — problem con prompts largos del agente.
 - **RAM necesaria**: ~5 GB VRAM / 6 GB RAM
@@ -72,9 +84,11 @@ ollama pull dolphin-mistral:latest
   el análisis inicial (strings+nm+r2) supera ~4000 tokens. Usar solo para consultas cortas.
 
 ### 6. dolphin3:8b
+
 ```
 ollama pull dolphin3:8b
 ```
+
 - **Por qué**: Versión mejorada de Dolphin, basada en Llama 3.1. Más inteligente que
   dolphin-mistral con el mismo nivel de permisividad.
 - **Censura**: NINGUNA
@@ -84,9 +98,11 @@ ollama pull dolphin3:8b
 - **Uso recomendado**: Reemplaza a dolphin-mistral en el agente.
 
 ### 7. dolphin-llama3:8b
+
 ```
 ollama pull dolphin-llama3:8b
 ```
+
 - **Por qué**: Llama 3 sin censura. Buen equilibrio entre velocidad y calidad.
 - **Censura**: NINGUNA
 - **Contexto**: 8192 tokens ⚠️ pequeño (mismo problema que dolphin-mistral)
@@ -94,9 +110,11 @@ ollama pull dolphin-llama3:8b
 - **Velocidad**: Rápida
 
 ### 8. dolphin-mixtral:8x7b
+
 ```
 ollama pull dolphin-mixtral:8x7b
 ```
+
 - **Por qué**: Mixtral MoE sin censura — arquitectura de mezcla de expertos,
   mejor razonamiento que dolphin-mistral con el mismo espíritu de libertad total.
 - **Censura**: NINGUNA
@@ -109,9 +127,11 @@ ollama pull dolphin-mixtral:8x7b
 ## 🔓 Otros modelos sin censura / permisivos
 
 ### 9. nous-hermes2:10.7b
+
 ```
 ollama pull nous-hermes2:10.7b
 ```
+
 - **Por qué**: Nous Research produce modelos muy capaces y sin filtros agresivos.
   Excelente para razonamiento sobre seguridad.
 - **Censura**: Baja
@@ -119,9 +139,11 @@ ollama pull nous-hermes2:10.7b
 - **RAM necesaria**: ~8 GB VRAM
 
 ### 10. wizard-vicuna-uncensored:13b
+
 ```
 ollama pull wizard-vicuna-uncensored:13b
 ```
+
 - **Por qué**: Modelo antiguo pero explícitamente sin censura, útil para tareas
   de RE donde otros modelos se niegan.
 - **Censura**: NINGUNA
@@ -130,9 +152,11 @@ ollama pull wizard-vicuna-uncensored:13b
 - **Nota**: Modelo de 2023, menor calidad que alternativas modernas.
 
 ### 11. llama3.1:8b
+
 ```
 ollama pull llama3.1:8b
 ```
+
 - **Por qué**: Meta Llama 3.1 — aunque tiene algo de censura, es bastante permisivo
   con temas de RE/seguridad si se formula bien la pregunta.
 - **Censura**: Media-baja
@@ -141,9 +165,11 @@ ollama pull llama3.1:8b
 - **Velocidad**: Rápida
 
 ### 12. mistral:7b
+
 ```
 ollama pull mistral:7b
 ```
+
 - **Por qué**: El modelo base de Mistral tiene poca censura. Genera comandos de
   bash/python correctos. Base del dolphin-mistral.
 - **Censura**: Baja
@@ -155,17 +181,17 @@ ollama pull mistral:7b
 
 ## 📊 Tabla comparativa rápida
 
-| Modelo | Censura | Ctx | RAM | Velocidad | RE Score |
-|--------|---------|-----|-----|-----------|----------|
-| deepseek-r1:14b | Baja | 64K | 12GB | Media | ⭐⭐⭐⭐⭐ |
-| deepseek-r1:32b | Baja | 64K | 24GB | Lenta | ⭐⭐⭐⭐⭐ |
-| deepseek-coder-v2:16b | Muy baja | 128K | 12GB | Media | ⭐⭐⭐⭐⭐ |
-| dolphin3:8b | Ninguna | 131K | 6GB | Rápida | ⭐⭐⭐⭐ |
-| qwen2.5-coder:14b | Baja | 128K | 10GB | Rápida | ⭐⭐⭐⭐ |
-| dolphin-mixtral:8x7b | Ninguna | 32K | 30GB | Lenta | ⭐⭐⭐⭐ |
-| dolphin-mistral:latest | Ninguna | 8K ⚠️ | 6GB | Muy rápida | ⭐⭐ |
-| mistral:7b | Baja | 32K | 5GB | Muy rápida | ⭐⭐⭐ |
-| llama3.1:8b | Media | 128K | 6GB | Rápida | ⭐⭐⭐ |
+| Modelo                 | Censura  | Ctx   | RAM  | Velocidad  | RE Score   |
+| ---------------------- | -------- | ----- | ---- | ---------- | ---------- |
+| deepseek-r1:14b        | Baja     | 64K   | 12GB | Media      | ⭐⭐⭐⭐⭐ |
+| deepseek-r1:32b        | Baja     | 64K   | 24GB | Lenta      | ⭐⭐⭐⭐⭐ |
+| deepseek-coder-v2:16b  | Muy baja | 128K  | 12GB | Media      | ⭐⭐⭐⭐⭐ |
+| dolphin3:8b            | Ninguna  | 131K  | 6GB  | Rápida     | ⭐⭐⭐⭐   |
+| qwen2.5-coder:14b      | Baja     | 128K  | 10GB | Rápida     | ⭐⭐⭐⭐   |
+| dolphin-mixtral:8x7b   | Ninguna  | 32K   | 30GB | Lenta      | ⭐⭐⭐⭐   |
+| dolphin-mistral:latest | Ninguna  | 8K ⚠️ | 6GB  | Muy rápida | ⭐⭐       |
+| mistral:7b             | Baja     | 32K   | 5GB  | Muy rápida | ⭐⭐⭐     |
+| llama3.1:8b            | Media    | 128K  | 6GB  | Rápida     | ⭐⭐⭐     |
 
 ---
 

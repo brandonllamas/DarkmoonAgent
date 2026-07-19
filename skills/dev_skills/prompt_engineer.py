@@ -28,6 +28,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from skills.llm_client import chat_text
 
 try:
     import requests as _req
@@ -108,32 +109,12 @@ PROMPT_VARIANTS = {
 
 
 def _call_llm_test(messages: list, timeout: int = 30) -> tuple[str | None, float, str]:
-    """Test simple de llamada al LLM."""
-    if _req is None:
-        return None, 0, "requests no disponible"
+    """Test de JSON usando el backend activo (Ollama, LM Studio o DeepSeek)."""
     t0 = time.time()
     try:
-        payload = {
-            "model": "default",
-            "messages": messages,
-            "stream": False,
-            "format": "json",
-            "options": {"temperature": 0.05, "num_ctx": 4096},
-        }
-        # Extract model from messages if present
-        clean = []
-        model_name = "default"
-        for m in messages:
-            if isinstance(m, dict) and "model" in m:
-                model_name = m.pop("model")
-            clean.append(m)
-        payload["model"] = model_name
-        payload["messages"] = clean
-
-        r = _req.post(OLLAMA_URL, json=payload, timeout=timeout)
-        if not r.ok:
-            return None, (time.time() - t0) * 1000, f"HTTP {r.status_code}"
-        content = r.json()["message"]["content"]
+        model_name = next((m.get("model", "") for m in messages if isinstance(m, dict) and m.get("model")), "")
+        clean = [{k:v for k,v in m.items() if k != "model"} for m in messages]
+        content = chat_text(clean, model_name, temperature=.05, max_tokens=4096, timeout=timeout, json_mode=True)
         return content, (time.time() - t0) * 1000, ""
     except Exception as e:
         return None, (time.time() - t0) * 1000, str(e)

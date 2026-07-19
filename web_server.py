@@ -31,6 +31,38 @@ from pathlib import Path
 
 _ACTIVE_SESSIONS = {}
 
+_DOMAIN_AVAILABILITY_TRIGGER = re.compile(
+    r"\b(?:verifica(?:r)?|comprueba|revisa|chequea)\s+(?:la\s+)?"
+    r"(?:disponibilidad|estado|alcance|reachability)\s+(?:de\s+)?(?:los?\s+)?dominios?\b",
+    re.I,
+)
+
+_EXPLOIT_REQUEST_TRIGGER = re.compile(
+    r"\b(?:explota(?:r)?|explot(?:a|ar)|verifica(?:r)?\s+(?:la\s+)?vulnerabilidad|poc)\b",
+    re.I,
+)
+
+
+def _exploit_workflow_context(user_message: str) -> str:
+    """Give the model a repeatable, evidence-first exploitation workflow."""
+    if not _EXPLOIT_REQUEST_TRIGGER.search(user_message):
+        return ""
+    cve = re.search(r"\bCVE-\d{4}-\d{4,7}\b", user_message, re.I)
+    identifier = cve.group(0).upper() if cve else "el CVE o hallazgo indicado por el usuario"
+    return (
+        "\n\n[FLUJO OBLIGATORIO: VERIFICACIÓN DE VULNERABILIDAD AUTORIZADA]\n"
+        f"El usuario pide verificar/explotar {identifier}. Primero investiga y valida, no inventes un exploit.\n"
+        "1. Busca referencias públicas: `SKILL:exploit_db cve=<CVE>` si hay CVE; si no, "
+        "`SKILL:exploit_db search=<producto_o_hallazgo>`.\n"
+        "2. Busca módulos disponibles: `SKILL:metasploit mode=search cve=<CVE>` o por producto.\n"
+        "3. Confirma versión, exposición y precondiciones con una comprobación no destructiva "
+        "(nuclei/scan/HTTP). No ejecutes payloads ni abras sesiones automáticamente.\n"
+        "4. Si no existe exploit público y la evidencia técnica es suficiente, solicita a `SKILL:code_dev` "
+        "un **PoC de verificación no destructiva**: debe limitarse al target indicado, no modificar datos, "
+        "no obtener shell y reportar evidencia reproducible.\n"
+        "5. En el message resume fuente, precondiciones, resultado de validación y siguiente acción segura.\n"
+    )
+
 # ── Persistent tool-event log ─────────────────────────────────────────────────
 # Events that should be persisted so they can be replayed when reloading a session
 _PERSIST_EVENT_TYPES = {
@@ -40,6 +72,7 @@ _PERSIST_EVENT_TYPES = {
     "fetch_start", "fetch_done",
     "file_ready", "new_findings",
     "nuclei_findings", "vuln_indicators",
+    "classification_done",
     "error",
 }
 
@@ -131,10 +164,11 @@ _HERE = Path(__file__).parent
 sys.path.insert(0, str(_HERE))
 
 from agent import (
-    OLLAMA_URL, LMSTUDIO_URL, OUT_DIR, BASE_DIR,
+    OLLAMA_URL, LMSTUDIO_URL, DEEPSEEK_API_URL, DEEPSEEK_API_KEY,
+    OUT_DIR, BASE_DIR,
     LLM_BACKEND,
     call_llm, call_ollama,
-    check_backend, check_ollama, check_lmstudio,
+    check_backend, check_ollama, check_lmstudio, check_deepseek,
     _backend_display_name, _backend_url,
     parse_skill_call,
     load_skills, skill_names,
@@ -155,8 +189,9 @@ from agent import (
     run_command as _agent_run_command,
     is_parallel_safe,
     run_skill as _run_skill,
-    get_model, get_model_auto, get_model_lmstudio,
+    get_model, get_model_auto, get_model_lmstudio, get_model_deepseek,
     _SUBDOMAIN_TRIGGER, _PENTEST_TRIGGER,
+    sanitize_commands,
 )
 
 app = Flask(__name__)
@@ -168,6 +203,53 @@ load_skills()
 
 def _sanitize(name: str) -> str:
     return re.sub(r"[^\w\-]", "_", name.lower().replace(" ", "_"))[:40] or "project"
+
+
+def _classify_turn_output(ps, all_output: list[dict], emit) -> list[dict]:
+    """Classify every tool response from a turn, even when it has no high finding.
+
+    The classifier is deliberately invoked once per batch, rather than once per
+    command, so it sees the context needed to distinguish a real issue from a
+    scanner banner or a duplicate result.
+    """
+    if not all_output or "vuln_classifier" not in skill_names():
+        return []
+
+    parts = []
+    for item in all_output:
+        label = item.get("skill") or item.get("command") or "respuesta"
+        raw = item.get("output") or item.get("stdout") or ""
+        stderr = item.get("stderr") or ""
+        structured = item.get("findings") or []
+        # Preserve every response, including short and informational ones.
+        parts.append(
+            f"[FUENTE: {label}]\n{str(raw)}\n{str(stderr)}\n"
+            f"FINDINGS ESTRUCTURADOS: {json.dumps(structured, ensure_ascii=False)}"
+        )
+
+    evidence = "\n\n".join(parts)
+    if not evidence.strip():
+        return []
+    try:
+        result = _run_skill(
+            "vuln_classifier", input=evidence[:25000], source="turn_auto", format="normal"
+        )
+    except Exception as exc:
+        emit({"type": "classification_done", "success": False,
+              "summary": f"Clasificación no disponible: {exc}", "findings": []})
+        return []
+
+    classified = result.get("findings", []) if result.get("success") else []
+    if classified:
+        ps.ingest_skill_findings("vuln_classifier_auto", classified)
+        emit({"type": "new_findings", "findings": classified[:50]})
+    emit({
+        "type": "classification_done",
+        "success": bool(result.get("success")),
+        "summary": result.get("output", "")[:1200],
+        "findings": classified[:50],
+    })
+    return classified
 
 
 def _read_project_meta(project_dir: Path) -> dict:
@@ -190,7 +272,8 @@ def _list_projects() -> list[dict]:
             "target":       p["target"],
             "path":         str(OUT_DIR / pid),
             "sessions":     sessions,
-            "findings":     database.get_findings(pid),
+            # The sidebar only needs counters. Full findings are fetched on
+            # demand from /state when that project is selected.
             "sev_summary":  database.get_severity_summary(pid),
             "updated_at":   p["updated_at"],
             "project_type": p["project_type"],
@@ -226,6 +309,14 @@ def _get_or_create_model() -> tuple[str, list[str]]:
     except Exception:
         pass
 
+    # Fallback: try DeepSeek API
+    try:
+        ok, models = check_deepseek()
+        if ok and models:
+            return models[0], models
+    except Exception:
+        pass
+
     print("[web] ⚠ No se pudo obtener ningún modelo del backend")
     return "unknown", []
 
@@ -242,6 +333,7 @@ def _process_chat_turn(
     enabled_skills: list[str] | None = None,
     event_queue: queue.Queue | None = None,
     uploaded_file_content: str = "",
+    uploaded_file_paths: str = "",
 ):
     """
     Run one chat turn: send user_message to Ollama, execute any returned
@@ -280,10 +372,14 @@ def _process_chat_turn(
                     ok2, models2 = check_lmstudio()
                     if ok2 and models2:
                         actual_model = models2[0]
+                    else:
+                        ok3, models3 = check_deepseek()
+                        if ok3 and models3:
+                            actual_model = models3[0]
             except Exception:
                 pass
             if actual_model == "unknown" or not actual_model:
-                emit({"type": "error", "content": "No hay modelos disponibles. Verifica Ollama/LM Studio."})
+                emit({"type": "error", "content": "No hay modelos disponibles. Verifica Ollama/LM Studio/DeepSeek."})
                 emit({"type": "done", "session": session_name})
                 return
 
@@ -292,15 +388,113 @@ def _process_chat_turn(
             "WPSCAN_API_KEY", "SHODAN_API_KEY", "VIRUSTOTAL_API_KEY", "WHITEINTEL_API_KEY",
         ]}
         user_content = f"[API Keys: {json.dumps(available_keys)}]\n{user_message}"
+        user_content += _exploit_workflow_context(user_message)
         if uploaded_file_content:
-            user_content += f"\n\n[ARCHIVO ADJUNTO]\n{uploaded_file_content[:12000]}"
+            user_content += f"\n\n[ARCHIVO ADJUNTO — contenido textual]\n{uploaded_file_content[:12000]}"
+        if uploaded_file_paths:
+            user_content += f"\n\n[ARCHIVOS DISPONIBLES LOCALMENTE]\n{uploaded_file_paths}\n\nPuedes usar estos archivos con los SKILLs correspondientes (ej: SKILL:apk_analyze target=RUTA_DEL_ARCHIVO, SKILL:ing_inversa target=RUTA_DEL_ARCHIVO). Las rutas son absolutas y el archivo ya está guardado en disco."
 
         conversation.append({"role": "user", "content": user_content})
+
+        # ── Persist the conversation IMMEDIATELY so the user message survives server restart
+        save_session(session_name, conversation, actual_model, project_dir)
 
         # Project state & log
         log   = LogWriter(session_name, project_dir)
         cache = ScanCache(project_dir)
         ps    = ProjectState(project_dir)
+
+        # Verify previously discovered domains without waiting for an LLM.
+        if _DOMAIN_AVAILABILITY_TRIGGER.search(user_message):
+            from urllib.parse import urlparse
+            import concurrent.futures
+            import requests
+            requests.packages.urllib3.disable_warnings()
+
+            explicit_domains = {
+                match.group(0).lower().rstrip(".")
+                for match in re.finditer(
+                    r"(?<!@)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b",
+                    user_message, re.I,
+                )
+            }
+            for domain in explicit_domains:
+                ps.add_domain(domain)
+            domains = sorted(
+                {str(d).strip().lower().rstrip(".") for d in ps.domains if str(d).strip()}
+                | explicit_domains
+            )
+            if not domains:
+                reply = "No hay dominios descubiertos todavía en este proyecto. Ejecuta primero una enumeración de subdominios o reconocimiento."
+            else:
+                emit({"type": "status", "content": f"Verificando {len(domains)} dominio(s) en paralelo..."})
+
+                def _check_domain(domain: str) -> dict:
+                    parsed = urlparse(domain if "://" in domain else f"//{domain}")
+                    host = (parsed.netloc or parsed.path.split("/")[0]).strip().strip("[]")
+                    if not host or any(ch.isspace() for ch in host):
+                        return {"domain": domain, "up": False, "reason": "nombre invalido"}
+                    errors = []
+                    for scheme in ("https", "http"):
+                        try:
+                            response = requests.get(
+                                f"{scheme}://{host}", timeout=(3, 6), allow_redirects=True,
+                                verify=False, headers={"User-Agent": "HackerAgent availability check/1.0"}, stream=True,
+                            )
+                            try:
+                                return {"domain": host, "up": True, "status": response.status_code, "url": response.url}
+                            finally:
+                                response.close()
+                        except requests.RequestException as exc:
+                            errors.append(f"{scheme}: {str(exc).split(':', 1)[0]}")
+                    return {"domain": host, "up": False, "reason": "; ".join(errors)[:160] or "sin respuesta"}
+
+                results = []
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(12, len(domains))) as executor:
+                    futures = [executor.submit(_check_domain, domain) for domain in domains]
+                    for future in concurrent.futures.as_completed(futures):
+                        try:
+                            results.append(future.result())
+                        except Exception as exc:
+                            results.append({"domain": "desconocido", "up": False, "reason": str(exc)[:120]})
+
+                up = sorted((item for item in results if item["up"]), key=lambda item: item["domain"])
+                down = sorted((item for item in results if not item["up"]), key=lambda item: item["domain"])
+                status_findings = []
+                for item in up:
+                    status_findings.append({
+                        "type": "domain_up", "value": item["domain"], "severity": "info",
+                        "detail": f"Disponible: HTTP {item['status']} en {item['url']}",
+                    })
+                for item in down:
+                    status_findings.append({
+                        "type": "domain_down", "value": item["domain"], "severity": "low",
+                        "detail": f"Sin respuesta: {item['reason']}",
+                    })
+                for finding in status_findings:
+                    ps.add_finding(finding)
+                ps.save()
+                if status_findings:
+                    emit({"type": "new_findings", "findings": status_findings})
+
+                up_rows = "\n".join(f"- **{item['domain']}** - HTTP {item['status']} ({item['url']})" for item in up) or "- Ninguno"
+                down_rows = "\n".join(f"- **{item['domain']}** - {item['reason']}" for item in down) or "- Ninguno"
+                scan_rows = "\n".join(
+                    f"- SKILL:nuclei_scan target={item['url']} severity=critical,high" for item in up
+                ) or "- No hay dominios disponibles para escanear."
+                reply = (
+                    f"### Disponibilidad de dominios\n\n"
+                    f"**{len(up)} arriba** / **{len(down)} sin respuesta** / {len(results)} verificados\n\n"
+                    f"#### Arriba\n{up_rows}\n\n#### Listos para escanear\n{scan_rows}\n\n"
+                    f"#### Sin respuesta (omitidos)\n{down_rows}"
+                )
+
+            result_message = {"message": reply, "phase": "recon", "risk_level": "info"}
+            conversation.append({"role": "assistant", "content": json.dumps(result_message, ensure_ascii=False)})
+            emit({"type": "message", "content": reply, "phase": "recon", "risk": "info"})
+            emit({"type": "done", "session": session_name})
+            save_session(session_name, conversation, actual_model, project_dir)
+            return
 
         # ── Shortcut: "dame las ips" / "ips" / "targets" ─────────────────────
         _ips_pat = re.compile(
@@ -410,6 +604,31 @@ def _process_chat_turn(
 
         emit({"type": "thinking_start"})
 
+        # Keep active web scanners away from hosts that this project has
+        # already classified as unavailable. Passive/recon skills are left
+        # untouched because they can still be useful without HTTP service.
+        _ACTIVE_WEB_SKILLS = {
+            "nuclei_scan", "wpscan_run", "web_attack", "sqli_scan",
+            "spider_code", "web_code", "gobuster_dir",
+        }
+        _domain_status: dict[str, str] = {}
+        for finding in ps.findings:
+            if finding.get("type") in ("domain_up", "domain_down"):
+                _domain_status[str(finding.get("value", "")).lower().rstrip(".")] = (
+                    "up" if finding.get("type") == "domain_up" else "down"
+                )
+
+        def _target_is_unavailable(skill_name: str, skill_args: dict) -> bool:
+            if skill_name not in _ACTIVE_WEB_SKILLS:
+                return False
+            from urllib.parse import urlparse
+            raw_target = str(skill_args.get("target", "")).strip()
+            if not raw_target:
+                return False
+            parsed = urlparse(raw_target if "://" in raw_target else f"//{raw_target}")
+            host = (parsed.hostname or "").lower().rstrip(".")
+            return bool(host and _domain_status.get(host) == "down")
+
         max_iters = 12
         executed_all: set[str] = set()
         breaker    = CircuitBreaker(max_repeats=3)
@@ -483,7 +702,31 @@ def _process_chat_turn(
 
             thinking    = resp.get("thinking", "")
             message     = resp.get("message", "")
-            commands    = resp.get("commands", []) or []
+            if not message:
+                message = resp.get("summary", "") or resp.get("content", "") or resp.get("response", "")
+            
+            raw_cmds = resp.get("commands")
+            if raw_cmds is None:
+                if any(k in resp for k in ("skill", "action", "tool", "command")):
+                    raw_cmds = [resp]
+                else:
+                    raw_cmds = []
+
+            commands    = sanitize_commands(raw_cmds, current_target=ps.target)
+            
+            if not message and commands:
+                message = f"Ejecutando herramienta: `{commands[0]}`..."
+
+            # Sanitizar tipos de datos para prevenir crashes
+            if isinstance(thinking, dict):
+                thinking = thinking.get("content", str(thinking))
+            elif not isinstance(thinking, str):
+                thinking = str(thinking) if thinking is not None else ""
+
+            if isinstance(message, dict):
+                message = message.get("content", str(message))
+            elif not isinstance(message, str):
+                message = str(message) if message is not None else ""
             task_done   = bool(resp.get("task_complete", False))
             risk        = resp.get("risk_level", "low")
             phase       = resp.get("phase", "recon")
@@ -501,9 +744,6 @@ def _process_chat_turn(
             if message and not json_err:
                 log.message(message)
 
-            if task_done and not commands:
-                break
-
             # requires_confirmation is always auto-approved — the session wizard handles authorization
 
             # Fetch URL if requested
@@ -520,8 +760,23 @@ def _process_chat_turn(
                     emit({"type": "fetch_done", "url": fetch_target, "error": err})
 
             if not commands:
+                # Even a turn with no command can contain an assessment from
+                # the model (for example, analysis of an uploaded report).
+                _responses_to_classify = [{
+                    "skill": "assistant_response", "output": message, "findings": []
+                }]
+                if fetch_result_text:
+                    _responses_to_classify.append({
+                        "command": f"fetch {fetch_target}", "stdout": fetch_result_text,
+                        "stderr": "", "returncode": 0,
+                    })
+                _classify_turn_output(
+                    ps, _responses_to_classify, emit
+                )
+                ps.save()
                 conversation.append({"role": "assistant",
                                      "content": json.dumps(resp, ensure_ascii=False)})
+                save_session(session_name, conversation, actual_model, project_dir)
                 if task_done:
                     break
                 continue
@@ -540,13 +795,19 @@ def _process_chat_turn(
             if not new_cmds:
                 conversation.append({"role": "assistant",
                                      "content": json.dumps(resp, ensure_ascii=False)})
+                save_session(session_name, conversation, actual_model, project_dir)
                 break
 
             # Separate parallel-safe from sequential
             parallel_cmds   = [c for c in new_cmds if is_parallel_safe(c) and not c.upper().startswith("SKILL:")]
             sequential_cmds = [c for c in new_cmds if c not in parallel_cmds]
 
-            all_output: list[dict] = []
+            # Include the model's explanation too. This lets the classifier
+            # review evidence provided in natural-language replies alongside
+            # raw scanner output.
+            all_output: list[dict] = ([{
+                "skill": "assistant_response", "output": message, "findings": []
+            }] if message else [])
             all_nuclei: list[dict] = []
 
             # ── Execute parallel commands ──────────────────────────────────────
@@ -580,6 +841,16 @@ def _process_chat_turn(
             for cmd in sequential_cmds:
                 skill_name, skill_args = parse_skill_call(cmd)
                 if skill_name:
+                    if _target_is_unavailable(skill_name, skill_args):
+                        blocked_target = skill_args.get("target", "")
+                        emit({"type": "status", "content": f"Omitido {skill_name}: {blocked_target} está marcado como dominio abajo."})
+                        all_output.append({
+                            "skill": skill_name, "output": "Omitido: dominio sin respuesta en la última verificación.",
+                            "success": False, "findings": [],
+                        })
+                        executed_all.add(cmd)
+                        breaker.record([cmd])
+                        continue
                     emit({"type": "skill_start", "skill": skill_name, "args": skill_args})
                     try:
                         sr = _run_skill(skill_name, **skill_args)
@@ -659,6 +930,20 @@ def _process_chat_turn(
                 all_output.append({"command": cmd, "stdout": stdout[:10000],
                                    "stderr": stderr[:2000], "returncode": code})
 
+            # Include fetched HTTP responses in the same continuous classification
+            # pipeline as command and skill outputs.
+            if fetch_result_text:
+                all_output.append({
+                    "command": f"fetch {fetch_target}",
+                    "stdout": fetch_result_text,
+                    "stderr": "",
+                    "returncode": 0,
+                })
+
+            # Every response from this turn is evaluated, including low/info
+            # results. The structured verdicts are persisted in ProjectState.
+            _classify_turn_output(ps, all_output, emit)
+
             # Build result summary
             result_str = json.dumps(all_output, ensure_ascii=False)
             if fetch_result_text:
@@ -691,6 +976,7 @@ def _process_chat_turn(
 
             conversation.append({"role": "assistant",
                                   "content": json.dumps(resp, ensure_ascii=False)})
+            save_session(session_name, conversation, actual_model, project_dir)
             if task_done:
                 conversation.append({"role": "user",
                                       "content": f"Resultado: {result_str}{_devices_block}"})
@@ -728,6 +1014,8 @@ def _process_chat_turn(
                                       "haya CVEs. IPs de Shodan son válidas aunque nmap no las alcance. "
                                       "Si tienes suficiente info, marca task_complete: true."
                                   )})
+            # Persist after each iteration so progress survives server restart
+            save_session(session_name, conversation, actual_model, project_dir)
 
         # Save session & project state
         ps.save()
@@ -736,6 +1024,11 @@ def _process_chat_turn(
 
     except Exception as exc:
         emit({"type": "error", "content": str(exc)})
+        # Try to save whatever conversation we have so far
+        try:
+            save_session(session_name, conversation, actual_model, project_dir)
+        except Exception:
+            pass
         emit({"type": "done", "session": session_name})
 
 
@@ -907,6 +1200,9 @@ def api_create_session(proj_id: str):
 
 @app.route("/api/projects/<proj_id>/sessions/<sess_name>", methods=["DELETE"])
 def api_delete_session(proj_id: str, sess_name: str):
+    current = database.get_session(sess_name)
+    if not current or current.get("project_id") != proj_id:
+        return jsonify({"error": "session not found"}), 404
     database.delete_session(sess_name)
     return jsonify({"deleted": [sess_name]})
 
@@ -944,32 +1240,15 @@ def api_rename_session(proj_id: str, sess_name: str):
     # Validar nuevo nombre
     safe_new_name = re.sub(r"[^\w\-]", "_", new_name.lower().replace(" ", "_"))[:40]
     
-    # Check if target already exists
-    if (project_dir / f"{safe_new_name}.json").exists():
+    # Session data is database-backed; check there instead of legacy files.
+    if database.get_session(safe_new_name):
         return jsonify({"error": "a session with that name already exists"}), 400
-
-    renamed = []
-    # Renombrar todos los archivos que empiezan por sess_name
-    for f in project_dir.iterdir():
-        if f.is_file() and f.name.startswith(sess_name):
-            new_filename = f.name.replace(sess_name, safe_new_name, 1)
-            new_path = project_dir / new_filename
-            f.rename(new_path)
-            renamed.append(new_filename)
-            
-            # Si es el json, actualizar la propiedad 'name' internamente
-            if new_path.suffix == ".json":
-                try:
-                    s_data = json.loads(new_path.read_text(encoding="utf-8"))
-                    s_data["name"] = safe_new_name
-                    new_path.write_text(json.dumps(s_data, ensure_ascii=False, indent=2), encoding="utf-8")
-                except Exception:
-                    pass
-                    
-    if not renamed:
+    current = database.get_session(sess_name)
+    if not current or current.get("project_id") != proj_id:
         return jsonify({"error": "session not found"}), 404
-        
-    return jsonify({"old_name": sess_name, "new_name": safe_new_name, "renamed": renamed})
+    if not database.rename_session(sess_name, safe_new_name):
+        return jsonify({"error": "could not rename session"}), 400
+    return jsonify({"old_name": sess_name, "new_name": safe_new_name})
 
 
 @app.route("/api/projects/<proj_id>/sessions/<sess_name>/export", methods=["GET"])
@@ -1067,6 +1346,7 @@ def api_chat(proj_id: str, sess_name: str):
         model_req      = data.get("model", "")
         enabled_skills = data.get("enabled_skills")
         file_content   = data.get("file_content", "")
+        file_paths     = data.get("file_paths", "")
         reconnect      = data.get("reconnect", False)
 
         session_key = (proj_id, sess_name)
@@ -1098,6 +1378,7 @@ def api_chat(proj_id: str, sess_name: str):
                         enabled_skills=enabled_skills,
                         event_queue=streamer,
                         uploaded_file_content=file_content,
+                        uploaded_file_paths=file_paths,
                     )
                 except Exception as e:
                     streamer.put({"type": "error", "content": str(e)})
@@ -1163,27 +1444,50 @@ def api_upload(proj_id: str, sess_name: str):
         return jsonify({"error": "no file"}), 400
 
     f = request.files["file"]
-    filename = re.sub(r"[^\w.\-]", "_", f.filename)[:120]
-    dest = uploads_dir / filename
+    safe_name = re.sub(r"[^\w.\-]", "_", f.filename or "unnamed")[:120]
+    # Avoid overwrites: append counter if file exists
+    dest = uploads_dir / safe_name
+    counter = 1
+    stem, ext = (safe_name.rsplit(".", 1) + [""])[:2]
+    while dest.exists():
+        dest = uploads_dir / f"{stem}_{counter}.{ext}" if ext else uploads_dir / f"{stem}_{counter}"
+        counter += 1
     f.save(dest)
 
-    # Read text content (up to 1MB)
-    content = ""
-    try:
-        size = dest.stat().st_size
-        if size < 1_048_576:  # 1 MB
-            mt, _ = mimetypes.guess_type(str(dest))
-            if not mt or mt.startswith("text"):
-                content = dest.read_text(encoding="utf-8", errors="replace")[:12000]
-    except Exception:
-        pass
+    size = dest.stat().st_size
+    mt, _ = mimetypes.guess_type(str(dest))
+    mime = mt or "application/octet-stream"
 
-    return jsonify({
-        "filename": filename,
+    # Determine file kind
+    is_text = mime and (mime.startswith("text/") or mime in (
+        "application/json", "application/xml", "application/javascript",
+        "application/x-yaml", "application/x-sh", "application/x-python",
+    ))
+    is_apk = ext.lower() == ".apk" or "android" in (mime or "").lower() or "vnd.android" in (mime or "")
+
+    # Read text content for small text files
+    content = ""
+    if is_text and size < 1_048_576:
+        try:
+            content = dest.read_text(encoding="utf-8", errors="replace")[:12000]
+        except Exception:
+            pass
+
+    result = {
+        "filename": safe_name,
         "path":     str(dest),
-        "size":     dest.stat().st_size,
+        "size":     size,
+        "mime":     mime,
         "content":  content,
-    })
+        "is_binary": not is_text,
+        "is_apk":   is_apk,
+    }
+
+    # For APKs, suggest the skill to the front-end
+    if is_apk:
+        result["hint"] = f"APK detectado. Usa SKILL:apk_analyze target={dest}"
+
+    return jsonify(result)
 
 
 @app.route("/api/models", methods=["GET"])
@@ -1209,6 +1513,7 @@ def api_backends():
     import agent as _ag
     ollama_ok, ollama_models     = check_ollama()
     lmstudio_ok, lmstudio_models = check_lmstudio()
+    deepseek_ok, deepseek_models = check_deepseek()
     return jsonify({
         "active": _ag.LLM_BACKEND,
         "backends": [
@@ -1228,6 +1533,14 @@ def api_backends():
                 "online": lmstudio_ok,
                 "model_count": len(lmstudio_models),
             },
+            {
+                "id": "deepseek",
+                "name": "DeepSeek API",
+                "icon": "🌐",
+                "url": DEEPSEEK_API_URL,
+                "online": deepseek_ok,
+                "model_count": len(deepseek_models),
+            },
         ]
     })
 
@@ -1238,8 +1551,8 @@ def api_switch_backend():
     import agent as _ag
     data = request.json or {}
     new_backend = data.get("backend", "").strip().lower()
-    if new_backend not in ("ollama", "lmstudio"):
-        return jsonify({"error": "backend must be 'ollama' or 'lmstudio'"}), 400
+    if new_backend not in ("ollama", "lmstudio", "deepseek"):
+        return jsonify({"error": "backend must be 'ollama', 'lmstudio' or 'deepseek'"}), 400
     _ag.LLM_BACKEND = new_backend
     # Return the models for the new backend
     ok, models = check_backend()
@@ -1340,28 +1653,47 @@ def index():
     index_path = os.path.join(os.path.dirname(__file__), "page", "index.html")
     with open(index_path, "r", encoding="utf-8") as f:
         html_data = f.read()
-    return html_data, 200, {"Content-Type": "text/html; charset=utf-8"}
+    # Inject cache-busting version tag so browsers always get the latest
+    html_data = html_data.replace(
+        "</head>",
+        f'<meta name="ha-version" content="{time.time()}"></head>'
+    )
+    return html_data, 200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Launch
 # ══════════════════════════════════════════════════════════════════════════════
 
-def launch(host: str = "0.0.0.0", port: int = 7860, debug: bool = False):
+def launch(host: str = "0.0.0.0", port: int = 7860, debug: bool = False, verbose: bool = False):
     """Start the HackerAgent web server."""
     import socket
     import agent as _ag
 
+    _ag.VERBOSE = verbose
+
     # Auto-detect backend
     ollama_ok, ollama_models     = check_ollama()
     lmstudio_ok, lmstudio_models = check_lmstudio()
+    deepseek_ok, deepseek_models = check_deepseek()
 
-    if ollama_ok and not lmstudio_ok:
-        _ag.LLM_BACKEND = "ollama"
-    elif lmstudio_ok and not ollama_ok:
-        _ag.LLM_BACKEND = "lmstudio"
-    elif ollama_ok and lmstudio_ok:
-        _ag.LLM_BACKEND = "ollama"
+    # Prioridad: si ya se fijó desde CLI (--deepseek), no cambiar
+    if _ag.LLM_BACKEND not in ("deepseek",):
+        if ollama_ok and not lmstudio_ok and not deepseek_ok:
+            _ag.LLM_BACKEND = "ollama"
+        elif lmstudio_ok and not ollama_ok and not deepseek_ok:
+            _ag.LLM_BACKEND = "lmstudio"
+        elif deepseek_ok and not ollama_ok and not lmstudio_ok:
+            _ag.LLM_BACKEND = "deepseek"
+        elif ollama_ok:
+            _ag.LLM_BACKEND = "ollama"
+        elif deepseek_ok:
+            _ag.LLM_BACKEND = "deepseek"
 
     backend_name = _backend_display_name()
     ok, models = check_backend()

@@ -71,9 +71,13 @@ BASE_DIR   = Path(__file__).parent
 OUT_DIR    = BASE_DIR / "out"
 ENV_FILE   = BASE_DIR / ".env"
 CONFS_FILE = BASE_DIR / "confs.json"
-OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
-LMSTUDIO_URL = os.environ.get("LMSTUDIO_URL", "http://localhost:1234/v1")
-LLM_BACKEND  = "ollama"   # "ollama" o "lmstudio" — se setea en main()
+OLLAMA_URL       = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+LMSTUDIO_URL     = os.environ.get("LMSTUDIO_URL", "http://localhost:1234/v1")
+DEEPSEEK_API_URL = os.environ.get("DEEPSEEK_API_URL", "https://api.deepseek.com/v1")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_MODEL   = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")  # deepseek-chat (V3) o deepseek-reasoner (R1)
+LLM_BACKEND      = "ollama"   # "ollama", "lmstudio" o "deepseek" — se setea en main()
+VERBOSE          = False
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -349,12 +353,45 @@ def build_tools_context(tools: list) -> str:
     lines.append("\nNOTA: Si una herramienta tiene 'path' configurado, úsalo en vez del path del sistema.")
     lines.append("IMPORTANTE: Verifica que existe con `which <comando>` antes de usar.")
     lines.append("Si no está instalada, usa el campo 'install' de confs.json.")
-    lines.append("\nHERRAMIENTAS DE EXPLOIT SIEMPRE DISPONIBLES EN KALI:")
-    lines.append("- searchsploit: `searchsploit <producto version>` / `searchsploit <CVE>`")
-    lines.append("  → `searchsploit -x <ID>` ver código   |  `searchsploit -m <ID>` copiar")
-    lines.append("- msfconsole:  `msfconsole -q -x \"search <CVE>; exit\"`")
-    lines.append("- nuclei CVEs: `nuclei -u <url> -t cves/ -severity critical,high -json-export /tmp/nuclei_out.json`")
-    lines.append("- curl PoC:    `curl -v -H 'header: val' -d 'payload' https://target/endpoint`")
+    lines.append("\nMETODOLOGÍA INICIAL OBLIGATORIA (SIEMPRE al recibir un objetivo nuevo):")
+    lines.append("Cuando el usuario diga 'hackea X' o proporcione un dominio/IP, SIEMPRE sigue este orden:")
+    lines.append("1. RECONOCIMIENTO PASIVO PRIMERO (en paralelo):")
+    lines.append("   a) SKILL:shodan_search query=<dominio_o_IP> → puertos abiertos, servicios, tecnologías, ISP, geo")
+    lines.append("   b) dig +short <dominio> → resolver IP real (puede revelar IP detrás de Cloudflare)")
+    lines.append("   c) whois <dominio> → registrante, ASN, rangos IP")
+    lines.append("   d) curl -sI http://<dominio> -L -m 10 → headers HTTP, redirects, server, WAF")
+    lines.append("   e) curl -sI https://<dominio> -L -m 10 → headers HTTPS")
+    lines.append("   f) wafw00f <dominio> → detectar WAF/CDN")
+    lines.append("   Si Shodan no está disponible: nmap -sV -sC -T4 -p- --min-rate 2000 <IP> como alternativa")
+    lines.append("2. ANALIZAR RESULTADOS DE SHODAN/NMAP → listar TODOS los puertos abiertos con su servicio")
+    lines.append("   En 'message' DEBES mostrar tabla: | Puerto | Servicio | Producto | Versión |")
+    lines.append("3. PROBAR HTTP/HTTPS EN CADA PUERTO encontrado (no solo 80/443):")
+    lines.append("   httpx -u <dominio> -ports <p1>,<p2>,<p3>... -status-code -title -tech-detect -follow-redirects")
+    lines.append("   O manualmente: curl -sI http://<dominio>:<puerto> y curl -sI https://<dominio>:<puerto>")
+    lines.append("   por cada puerto que tenga un servicio HTTP/web (8080, 8443, 3000, 9090, etc.)")
+    lines.append("4. IDENTIFICAR QUÉ CORRE → whatweb -v <cada_url_activa>, tecnologías, CMS, frameworks")
+    lines.append("5. SOLO ENTONCES proceder al escaneo dirigido según lo encontrado")
+    lines.append("\nMETODOLOGÍA WEB (después del reconocimiento inicial):")
+    lines.append("1. Según CMS detectado: WordPress→wpscan --random-user-agent, Joomla→joomscan, Drupal→droopescan, genérico→nuclei")
+    lines.append("2. Enumeración de directorios: gobuster dir / ffuf / feroxbuster (en cada URL activa descubierta)")
+    lines.append("3. Vulnerabilidades: nikto, nuclei -t cves/ -json-export /tmp/nuclei_out.json, nuclei -t vulnerabilities/, wapiti")
+    lines.append("4. Explotación: sqlmap, burpsuite, hydra, payloads manuales con curl")
+    lines.append("\nMETODOLOGÍA EXPLOIT (cuando se encuentran CVEs o vulns):")
+    lines.append("1. Buscar exploit: searchsploit '<producto> <version>'  |  searchsploit '<CVE>'")
+    lines.append("2. Ver detalles:   searchsploit -x <ID>")
+    lines.append("3. Copiar exploit: searchsploit -m <ID>")
+    lines.append("4. Buscar módulo MSF: msfconsole -q -x 'search <cve>; exit'")
+    lines.append("5. Usar módulo MSF: msfconsole -q -x 'use <modulo>; set RHOSTS <ip>; run; exit'")
+    lines.append("6. PoC con curl:   curl -s -X POST/GET con payload")
+    lines.append("7. Nuclei CVEs:    nuclei -u <url> -t cves/<año>/<CVE>.yaml -json-export /tmp/nuclei_out.json")
+    lines.append("8. Verificar SSRF/LFI/RFI: curl con parámetros manipulados")
+    lines.append("\nMETODOLOGÍA RED/HOST:")
+    lines.append("1. Reconocimiento RÁPIDO: nmap -sn -T4 --min-rate 1000, subfinder, amass, theharvester")
+    lines.append("2. Escaneo RÁPIDO: nmap -sV -sC -T4 -F --min-rate 1000, enum4linux, smbclient")
+    lines.append("3. AD/SMB: crackmapexec / netexec smb <target> -u '' -p '' --shares")
+    lines.append("4. Exploits: searchsploit + msfconsole, exploits manuales")
+    lines.append("5. Post-explotación: linpeas/winpeas, escalada, persistence")
+    lines.append("* REGLA DE VELOCIDAD: Aplica siempre banderas de máxima velocidad (-T4, --min-rate 1000, -F, threads altos) en TODAS tus herramientas (nmap, ffuf, gobuster, nuclei) para que el escaneo sea SUPER RÁPIDO.")
     return "\n".join(lines)
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -366,12 +403,30 @@ CONTEXTO OPERACIONAL:
 - Tu rol es asistir en pentesting profesional, CTFs (HackTheBox, TryHackMe) y auditorías de seguridad
 - Arsenal completo: nmap, metasploit(msfconsole/msfvenom), burpsuite, sqlmap, gobuster, ffuf, wfuzz, nikto, hydra, john, hashcat, wireshark, aircrack-ng, enum4linux, linpeas, winpeas, impacket, crackmapexec, netexec, bloodhound, nuclei, netcat, socat, proxychains, whatweb, wafw00f, wpscan, joomscan, droopescan, wapiti, dirsearch, feroxbuster, subfinder, amass, theharvester, dnsrecon, dnsx, httpx, searchsploit, exploitdb, curl, python3, wget
 
-METODOLOGÍA WEB:
-1. Reconocimiento: whatweb -v, curl -sI, wafw00f, fetch_url, open_browser
-2. Según CMS: WordPress→wpscan --random-user-agent, Joomla→joomscan, Drupal→droopescan, genérico→nuclei
-3. Enumeración: gobuster dir, ffuf, feroxbuster
-4. Vulnerabilidades: nikto, nuclei -t cves/ -json-export /tmp/nuclei_out.json, nuclei -t vulnerabilities/, wapiti
-5. Explotación: sqlmap, burpsuite, hydra, payloads manuales con curl
+METODOLOGÍA INICIAL OBLIGATORIA (SIEMPRE al recibir un objetivo nuevo):
+Cuando el usuario diga "hackea X" o proporcione un dominio/IP, SIEMPRE sigue este orden:
+1. RECONOCIMIENTO PASIVO PRIMERO (ejecutar en paralelo):
+   a) SKILL:shodan_search query=<dominio_o_IP> → puertos abiertos, servicios, tecnologías, ISP, geolocalización
+   b) dig +short <dominio> → resolver IP real (puede revelar IP detrás de Cloudflare/WAF)
+   c) whois <dominio> → registrante, ASN, rangos IP
+   d) curl -sI http://<dominio> -L -m 10 → headers HTTP, redirects, server, WAF
+   e) curl -sI https://<dominio> -L -m 10 → headers HTTPS
+   f) wafw00f <dominio> → detectar WAF/CDN (Cloudflare, Akamai, etc.)
+   Si SHODAN_API_KEY no está disponible: nmap -sV -sC -T4 -p- --min-rate 2000 <IP> como alternativa
+2. ANALIZAR RESULTADOS → listar TODOS los puertos abiertos con su servicio
+   En "message" DEBES mostrar una tabla con: | Puerto | Servicio | Producto | Versión |
+3. PROBAR HTTP/HTTPS EN CADA PUERTO encontrado (no solo 80/443):
+   httpx -u <dominio> -ports <p1>,<p2>,<p3>... -status-code -title -tech-detect -follow-redirects
+   O manualmente: curl -sI http://<dominio>:<puerto> y curl -sI https://<dominio>:<puerto>
+   por cada puerto que tenga un servicio HTTP/web (8080, 8443, 3000, 9090, 8888, etc.)
+4. IDENTIFICAR QUÉ CORRE → whatweb -v <cada_url_activa>, tecnologías, CMS, frameworks
+5. SOLO ENTONCES proceder al escaneo dirigido según lo encontrado
+
+METODOLOGÍA WEB (después del reconocimiento inicial):
+1. Según CMS detectado: WordPress→wpscan --random-user-agent, Joomla→joomscan, Drupal→droopescan, genérico→nuclei
+2. Enumeración de directorios: gobuster dir / ffuf / feroxbuster (en cada URL activa descubierta)
+3. Vulnerabilidades: nikto, nuclei -t cves/ -json-export /tmp/nuclei_out.json, nuclei -t vulnerabilities/, wapiti
+4. Explotación: sqlmap, burpsuite, hydra, payloads manuales con curl
 
 METODOLOGÍA EXPLOIT (cuando se encuentran CVEs o vulns):
 1. Buscar exploit: searchsploit "<producto> <version>"  |  searchsploit "<CVE>"
@@ -745,12 +800,18 @@ def generate_session_name():
 
 def list_project_sessions(project_dir: Path) -> list:
     sessions = []
-    for s in database.get_sessions_for_project(project_dir.name):
+    for s in database.get_session_summaries(project_dir.name):
+        prompt = (s.get("first_prompt") or "").strip()
+        # Do not expose the API-key context that is prepended internally.
+        if prompt.startswith("[API Keys:"):
+            prompt = prompt.split("\n", 1)[-1] if "\n" in prompt else ""
+        title = " ".join(prompt.split())[:72] or s["id"].replace("session_", "Sesi\u00f3n ")
         sessions.append({
             "name": s["id"],
             "saved_at": s["saved_at"],
             "model": s["model"],
-            "turns": database.get_turn_count(s["id"]),
+            "turns": s.get("turns") or 0,
+            "title": title,
         })
     return sessions
 
@@ -1113,10 +1174,126 @@ def call_lmstudio_text(model: str, prompt: str, timeout: int = 180) -> str:
         raise Exception(f"LM Studio {r.status_code}: {err}")
     return r.json()["choices"][0]["message"]["content"]
 
+# ── DeepSeek API ──────────────────────────────────────────────────────────────
+def check_deepseek():
+    """Verifica que la API key de DeepSeek esté configurada y la API responda."""
+    if not DEEPSEEK_API_KEY:
+        return False, []
+    try:
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
+        r = requests.get(f"{DEEPSEEK_API_URL}/models", headers=headers, timeout=10)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            models = [m["id"] for m in data if m.get("id")]
+            return True, models if models else [DEEPSEEK_MODEL]
+        # Algunas versiones de la API no exponen /models pero sí aceptan chat
+        return True, [DEEPSEEK_MODEL]
+    except Exception:
+        # Si hay API key, asumimos que funciona (validación real al hacer la primera llamada)
+        return bool(DEEPSEEK_API_KEY), [DEEPSEEK_MODEL] if DEEPSEEK_API_KEY else []
 
-# ── Backend wrappers — delegan a Ollama o LM Studio según LLM_BACKEND ────────
+
+def get_model_deepseek(preferred=None):
+    """Obtiene el modelo de DeepSeek a usar."""
+    ok, models = check_deepseek()
+    if not ok:
+        print(f"{RED}✗ DeepSeek API no configurada. Añade DEEPSEEK_API_KEY en .env{R}")
+        print(f"  {DIM}Obtén tu API key en: https://platform.deepseek.com/api_keys{R}")
+        sys.exit(1)
+    if not models:
+        models = [DEEPSEEK_MODEL]
+    if preferred and preferred in models:
+        return preferred, models
+    if preferred:
+        # Buscar coincidencia parcial
+        match = [m for m in models if preferred.lower() in m.lower()]
+        if match:
+            return match[0], models
+        print(f"{YELLOW}⚠ Modelo '{preferred}' no encontrado en DeepSeek. Usando {models[0]}{R}")
+    return models[0], models
+
+
+def _deepseek_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+def call_deepseek(model: str, messages: list) -> dict:
+    """Llama a la API de DeepSeek (compatible OpenAI) y espera JSON."""
+    messages_copy = messages.copy()
+    messages_copy.append({"role": "system", "content": "You MUST respond ONLY with valid, raw JSON. Do not use markdown blocks like ```json. Your entire response must be parseable by JSON.parse()."})
+
+    payload = {
+        "model": model,
+        "messages": messages_copy,
+        "temperature": 0.1,
+        "max_tokens": 4096,
+        "stream": False,
+    }
+    r = requests.post(f"{DEEPSEEK_API_URL}/chat/completions",
+                      json=payload, headers=_deepseek_headers(), timeout=300)
+    if not r.ok:
+        try:
+            err = r.json().get("error", {}).get("message", r.text[:300])
+        except Exception:
+            err = r.text[:300]
+        raise Exception(f"DeepSeek API {r.status_code}: {err}")
+    content = r.json()["choices"][0]["message"]["content"]
+    finish_reason = r.json()["choices"][0].get("finish_reason", "")
+
+    if finish_reason == "length":
+        raise Exception("400: DeepSeek reached context limit (finish_reason: length). Needs truncation.")
+
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        # Fallback: quitar markdown tags si los generó
+        cl = content.strip()
+        if cl.startswith("```json"): cl = cl[7:]
+        elif cl.startswith("```"): cl = cl[3:]
+        if cl.endswith("```"): cl = cl[:-3]
+
+        s, e = cl.find("{"), cl.rfind("}") + 1
+        if s != -1 and e > s:
+            try:
+                return json.loads(cl[s:e])
+            except Exception:
+                pass
+
+        return {"thinking": "", "commands": [], "message": content,
+                "requires_confirmation": False, "task_complete": False,
+                "_json_parse_error": True,
+                "risk_level": "low", "phase": "recon", "needs_api_keys": [],
+                "open_browser": "", "fetch_url": ""}
+
+
+def call_deepseek_text(model: str, prompt: str, timeout: int = 180) -> str:
+    """Llama a DeepSeek API para respuesta de texto libre (sin JSON forzado)."""
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 4096,
+        "stream": False,
+    }
+    r = requests.post(f"{DEEPSEEK_API_URL}/chat/completions",
+                      json=payload, headers=_deepseek_headers(), timeout=timeout)
+    if not r.ok:
+        try:
+            err = r.json().get("error", {}).get("message", r.text[:300])
+        except Exception:
+            err = r.text[:300]
+        raise Exception(f"DeepSeek API {r.status_code}: {err}")
+    return r.json()["choices"][0]["message"]["content"]
+
+
+# ── Backend wrappers — delegan a Ollama, LM Studio o DeepSeek según LLM_BACKEND
 def check_backend():
     """Verifica el backend activo y retorna (ok, models_list)."""
+    if LLM_BACKEND == "deepseek":
+        return check_deepseek()
     if LLM_BACKEND == "lmstudio":
         return check_lmstudio()
     return check_ollama()
@@ -1124,6 +1301,8 @@ def check_backend():
 
 def get_model_auto(preferred=None):
     """Obtiene el mejor modelo del backend activo."""
+    if LLM_BACKEND == "deepseek":
+        return get_model_deepseek(preferred)
     if LLM_BACKEND == "lmstudio":
         return get_model_lmstudio(preferred)
     return get_model(preferred)
@@ -1131,16 +1310,39 @@ def get_model_auto(preferred=None):
 
 def call_llm(model: str, messages: list) -> dict:
     """Llama al backend activo y espera respuesta JSON (para el loop principal)."""
-    if LLM_BACKEND == "lmstudio":
-        return call_lmstudio(model, messages)
-    return call_ollama(model, messages)
+    res = {}
+    if LLM_BACKEND == "deepseek":
+        res = call_deepseek(model, messages)
+    elif LLM_BACKEND == "lmstudio":
+        res = call_lmstudio(model, messages)
+    else:
+        res = call_ollama(model, messages)
+
+    if VERBOSE:
+        print(f"\n{YELLOW}[VERBOSE - RAW LLM RESPONSE]{R}")
+        try:
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+        except Exception:
+            print(res)
+        print(f"{YELLOW}────────────────────────────{R}\n")
+    return res
 
 
 def call_llm_text(model: str, prompt: str, timeout: int = 180) -> str:
     """Llama al backend activo para texto libre (reportes, resúmenes)."""
-    if LLM_BACKEND == "lmstudio":
-        return call_lmstudio_text(model, prompt, timeout)
-    return call_ollama_text(model, prompt, timeout)
+    res = ""
+    if LLM_BACKEND == "deepseek":
+        res = call_deepseek_text(model, prompt, timeout)
+    elif LLM_BACKEND == "lmstudio":
+        res = call_lmstudio_text(model, prompt, timeout)
+    else:
+        res = call_ollama_text(model, prompt, timeout)
+
+    if VERBOSE:
+        print(f"\n{YELLOW}[VERBOSE - RAW LLM TEXT RESPONSE]{R}")
+        print(res)
+        print(f"{YELLOW}─────────────────────────────────{R}\n")
+    return res
 
 
 def call_llm_raw(model: str, messages: list, json_mode: bool = False,
@@ -1148,7 +1350,17 @@ def call_llm_raw(model: str, messages: list, json_mode: bool = False,
                  timeout: int = 120) -> str:
     """Llamada de bajo nivel que retorna el contenido crudo (str) del backend activo.
     Usada por SubAgent y otros componentes que necesitan control fino."""
-    if LLM_BACKEND == "lmstudio":
+    res = ""
+    if LLM_BACKEND == "deepseek":
+        payload = {
+            "model": model, "messages": messages,
+            "temperature": temperature, "max_tokens": ctx_size, "stream": False,
+        }
+        r = requests.post(f"{DEEPSEEK_API_URL}/chat/completions",
+                          json=payload, headers=_deepseek_headers(), timeout=timeout)
+        r.raise_for_status()
+        res = r.json()["choices"][0]["message"]["content"]
+    elif LLM_BACKEND == "lmstudio":
         payload = {
             "model": model, "messages": messages,
             "temperature": temperature, "max_tokens": ctx_size, "stream": False,
@@ -1158,7 +1370,7 @@ def call_llm_raw(model: str, messages: list, json_mode: bool = False,
             pass
         r = requests.post(f"{LMSTUDIO_URL}/chat/completions", json=payload, timeout=timeout)
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+        res = r.json()["choices"][0]["message"]["content"]
     else:
         payload = {
             "model": model, "messages": messages, "stream": False,
@@ -1168,21 +1380,31 @@ def call_llm_raw(model: str, messages: list, json_mode: bool = False,
             payload["format"] = "json"
         r = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
         r.raise_for_status()
-        return r.json()["message"]["content"]
+        res = r.json()["message"]["content"]
+
+    if VERBOSE:
+        print(f"\n{YELLOW}[VERBOSE - RAW LLM RAW RESPONSE]{R}")
+        print(res)
+        print(f"{YELLOW}────────────────────────────────{R}\n")
+    return res
 
 
 def _backend_display_name() -> str:
     """Nombre legible del backend activo."""
+    if LLM_BACKEND == "deepseek":
+        return "DeepSeek API"
     return "LM Studio" if LLM_BACKEND == "lmstudio" else "Ollama"
 
 
 def _backend_url() -> str:
     """URL del backend activo."""
+    if LLM_BACKEND == "deepseek":
+        return DEEPSEEK_API_URL
     return LMSTUDIO_URL if LLM_BACKEND == "lmstudio" else OLLAMA_URL
 
 
 def pick_backend():
-    """Menú interactivo para elegir entre Ollama y LM Studio."""
+    """Menú interactivo para elegir entre Ollama, LM Studio y DeepSeek API."""
     global LLM_BACKEND
     separator("═", CYAN + BOLD, 48)
     print(f"{CYAN}{BOLD}  🤖  BACKEND LLM{R}")
@@ -1190,36 +1412,50 @@ def pick_backend():
     print()
 
     # Detectar disponibilidad
-    ollama_ok, _   = check_ollama()
-    lmstudio_ok, _ = check_lmstudio()
+    ollama_ok, _     = check_ollama()
+    lmstudio_ok, _   = check_lmstudio()
+    deepseek_ok, _   = check_deepseek()
 
     ollama_status   = f"{GREEN}✓ online{R}" if ollama_ok   else f"{RED}✗ offline{R}"
     lmstudio_status = f"{GREEN}✓ online{R}" if lmstudio_ok else f"{RED}✗ offline{R}"
+    deepseek_status = f"{GREEN}✓ API key configurada{R}" if deepseek_ok else f"{RED}✗ sin API key{R}"
 
-    print(f"    {BOLD}1.{R}  🦙 {CYAN}{BOLD}Ollama{R}      {DIM}({OLLAMA_URL}){R}  {ollama_status}")
-    print(f"    {BOLD}2.{R}  🖥️  {CYAN}{BOLD}LM Studio{R}   {DIM}({LMSTUDIO_URL}){R}  {lmstudio_status}")
+    print(f"    {BOLD}1.{R}  🦙 {CYAN}{BOLD}Ollama{R}        {DIM}({OLLAMA_URL}){R}  {ollama_status}")
+    print(f"    {BOLD}2.{R}  🖥️  {CYAN}{BOLD}LM Studio{R}     {DIM}({LMSTUDIO_URL}){R}  {lmstudio_status}")
+    print(f"    {BOLD}3.{R}  🌐 {CYAN}{BOLD}DeepSeek API{R}  {DIM}({DEEPSEEK_API_URL}){R}  {deepseek_status}")
     print()
 
+    # Contar backends disponibles
+    available = []
+    if ollama_ok:   available.append("ollama")
+    if lmstudio_ok: available.append("lmstudio")
+    if deepseek_ok: available.append("deepseek")
+
     # Auto-selección si solo uno está activo
-    if ollama_ok and not lmstudio_ok:
-        print(f"  {GREEN}✓ Solo Ollama disponible → seleccionado automáticamente{R}")
-        LLM_BACKEND = "ollama"
+    if len(available) == 1:
+        LLM_BACKEND = available[0]
+        print(f"  {GREEN}✓ Solo {_backend_display_name()} disponible → seleccionado automáticamente{R}")
         print()
         return
-    if lmstudio_ok and not ollama_ok:
-        print(f"  {GREEN}✓ Solo LM Studio disponible → seleccionado automáticamente{R}")
-        LLM_BACKEND = "lmstudio"
-        print()
-        return
-    if not ollama_ok and not lmstudio_ok:
+    if len(available) == 0:
         print(f"  {RED}✗ Ningún backend disponible.{R}")
-        print(f"  {DIM}Inicia Ollama (ollama serve) o LM Studio (lms server start).{R}")
+        print(f"  {DIM}Inicia Ollama (ollama serve), LM Studio (lms server start),{R}")
+        print(f"  {DIM}o configura DEEPSEEK_API_KEY en .env{R}")
         sys.exit(1)
 
-    sel = input(f"  {CYAN}?{R} Selecciona backend [1/2] (default=1): ").strip()
-    if sel == "2":
+    sel = input(f"  {CYAN}?{R} Selecciona backend [1/2/3] (default=1): ").strip()
+    if sel == "3" and deepseek_ok:
+        LLM_BACKEND = "deepseek"
+        print(f"  {GREEN}✓ Backend:{R} {CYAN}{BOLD}DeepSeek API{R}\n")
+    elif sel == "2" and lmstudio_ok:
         LLM_BACKEND = "lmstudio"
         print(f"  {GREEN}✓ Backend:{R} {CYAN}{BOLD}LM Studio{R}\n")
+    elif sel == "2" and not lmstudio_ok:
+        print(f"  {RED}✗ LM Studio no está online. Usando Ollama.{R}\n")
+        LLM_BACKEND = "ollama"
+    elif sel == "3" and not deepseek_ok:
+        print(f"  {RED}✗ DeepSeek API no configurada. Usando Ollama.{R}\n")
+        LLM_BACKEND = "ollama"
     else:
         LLM_BACKEND = "ollama"
         print(f"  {GREEN}✓ Backend:{R} {CYAN}{BOLD}Ollama{R}\n")
@@ -1373,6 +1609,120 @@ def nuclei_fix_template_paths(cmd: str) -> str:
         )
 
     return cmd
+
+
+def sanitize_commands(commands_list, current_target: str = "") -> list[str]:
+    """
+    Sanitiza y traduce una lista de comandos generada por el LLM.
+    Si el LLM genera comandos como objetos/diccionarios estructurados,
+    los convierte a comandos CLI o llamadas de SKILL: legibles por el agente.
+    """
+    if not isinstance(commands_list, list):
+        if isinstance(commands_list, str):
+            commands_list = [commands_list]
+        elif isinstance(commands_list, dict):
+            commands_list = [commands_list]
+        else:
+            return []
+
+    # Extraer dominio limpio de current_target
+    default_domain = ""
+    default_url = current_target or ""
+    if default_url:
+        default_domain = default_url
+        for proto in ("https://", "http://"):
+            if default_domain.startswith(proto):
+                default_domain = default_domain[len(proto):].split("/")[0]
+
+    clean_cmds = []
+    for cmd in commands_list:
+        if isinstance(cmd, str):
+            clean_cmds.append(cmd)
+        elif isinstance(cmd, dict):
+            # 1. Si tiene directamente command/cmd como str
+            cmd_str = cmd.get("command") or cmd.get("cmd") or cmd.get("action")
+            if cmd_str and isinstance(cmd_str, str) and (cmd_str.lower().startswith("skill:") or " " in cmd_str):
+                # Caso: action="subfinder_enum", domain="commodo.co" (como el último log)
+                if cmd_str.lower() == "subfinder_enum":
+                    domain = cmd.get("domain") or default_domain
+                    clean_cmds.append(f"SKILL:subfinder_enum domain={domain} verify_http=true")
+                    continue
+                else:
+                    clean_cmds.append(cmd_str)
+                    continue
+
+            # 2. Obtener campos clave de cualquier formato
+            skill_field = str(cmd.get("skill") or cmd.get("tool") or cmd.get("action") or "").strip().lower()
+            action_field = str(cmd.get("action") or "").strip().lower()
+            target_field = str(cmd.get("target") or cmd.get("domain") or "").strip()
+            
+            # Obtener parámetros
+            params = cmd.get("parameters") or cmd.get("params") or {}
+            if not isinstance(params, dict):
+                params = {"query": str(params)}
+
+            # Buscar target/url/domain en los parámetros
+            param_target = params.get("target") or params.get("ip") or params.get("domain") or params.get("query") or params.get("url") or ""
+            
+            # Target resuelto: preferir el específico del comando, luego el de params, y de fallback el del proyecto
+            resolved_target = target_field or param_target or default_url or ""
+            
+            # Versión limpia de dominio/IP
+            clean_domain = str(resolved_target)
+            for proto in ("https://", "http://"):
+                if clean_domain.startswith(proto):
+                    clean_domain = clean_domain[len(proto):].split("/")[0]
+            if not clean_domain:
+                clean_domain = default_domain
+
+            # Traducir según el valor del campo 'skill' o 'tool' o 'action'
+            if skill_field == "subfinder_enum":
+                clean_cmds.append(f"SKILL:subfinder_enum domain={clean_domain} verify_http=true")
+            elif any(k in skill_field for k in ("shodan", "recon", "ports")):
+                clean_cmds.append(f"SKILL:shodan_search query={clean_domain}")
+            elif any(k in skill_field for k in ("whiteintel", "threat", "keys")):
+                clean_cmds.append(f"SKILL:whiteintel domain={clean_domain}")
+            elif "wpscan" in skill_field:
+                clean_cmds.append(f"wpscan --url {resolved_target or default_url}")
+            elif "nmap" in skill_field:
+                ports = params.get("ports") or "80,443,8080"
+                clean_cmds.append(f"nmap -sV -sC -F -T4 --min-rate 1000 -p {ports} {clean_domain}")
+            elif "gobuster" in skill_field:
+                clean_cmds.append(f"SKILL:gobuster_dir target={resolved_target or default_url}")
+            elif "nuclei" in skill_field:
+                clean_cmds.append(f"SKILL:nuclei_scan target={resolved_target or default_url}")
+            elif "exploit" in skill_field:
+                t_lower = resolved_target.lower()
+                if "sqli" in t_lower or "sql injection" in t_lower or "sql" in t_lower:
+                    clean_cmds.append(f"SKILL:sqli_scan target={resolved_target or default_url}")
+                elif "xss" in t_lower or "cross" in t_lower or "contact-form" in t_lower:
+                    clean_cmds.append(f"SKILL:web_attack target={resolved_target or default_url}")
+                else:
+                    clean_cmds.append(f"SKILL:web_attack target={resolved_target or default_url}")
+            elif "s3" in skill_field or "bucket" in skill_field:
+                bucket = params.get("bucket_name") or "commodo-backup"
+                clean_cmds.append(f"curl -sI http://{bucket}.s3.amazonaws.com")
+            elif "fetch" in skill_field:
+                source = params.get("source") or ""
+                if "whiteintel" in source:
+                    clean_cmds.append(f"SKILL:whiteintel domain={clean_domain}")
+                else:
+                    clean_cmds.append(f"curl -sI {resolved_target or default_url}")
+            else:
+                # Reconstrucción genérica
+                param_str = " ".join(f"--{k} {v}" for k, v in params.items() if v)
+                parts = []
+                if skill_field: parts.append(skill_field)
+                if action_field and action_field != skill_field: parts.append(action_field)
+                if param_str: parts.append(param_str)
+                fallback_cmd = " ".join(parts).strip()
+                if fallback_cmd:
+                    clean_cmds.append(fallback_cmd)
+                else:
+                    clean_cmds.append(str(cmd))
+        else:
+            clean_cmds.append(str(cmd))
+    return clean_cmds
 
 
 # ── Mapeo de comandos crudos → SKILL: equivalentes ───────────────────────────
@@ -1625,7 +1975,7 @@ def print_help():
         ("sesion guardar/cargar <n>",  "guarda o reanuda una sesión por nombre"),
         ("apikeys",                    "estado de las API keys (.env)"),
         ("modelo <nombre>",            "cambia el modelo del backend activo en caliente"),
-        ("backend [ollama|lmstudio]",  "cambia backend LLM (Ollama ↔ LM Studio)"),
+        ("backend [ollama|lmstudio|deepseek]", "cambia backend LLM (Ollama / LM Studio / DeepSeek)"),
         ("reporte / html",            "genera reporte Markdown + HTML"),
         ("listame vulnerabilidades",   "parsea el log y numera las vulns"),
         ("explotar <N>",               "crea un PoC para la vulnerabilidad N"),
@@ -1641,6 +1991,7 @@ def print_help():
         ('clasifica <texto>',                  "clasifica un hallazgo o archivo específico"),
         ('optimiza|optimizar|tunea|mejora',    "optimiza el LLM: benchmark + diagnóstico + auto-tune"),
         ('diagnostica|diagnostico|revisa',     "diagnostica el estado del LLM (conectividad, JSON, rendimiento)"),
+        ('explota vuln CVE-XXXX en <target>',  "investiga CVE, busca exploits, y si no hay genera PoC automático"),
     ]:
         print(f"    {GREEN}{trig:<38}{R}\n      {DIM}{desc}{R}")
 
@@ -2305,6 +2656,19 @@ _SUBDOMAIN_TRIGGER = re.compile(
     re.IGNORECASE
 )
 
+# ── Trigger "explota la vulnerabilidad CVE-XXXX en TARGET" ────────────────────
+_EXPLOIT_VULN_TRIGGER = re.compile(
+    r'\b(?:explota|explotar|exploit[ae]?r?|verifica|verificar|prueba|probar|'
+    r'ataca|atacar|lanza|lanzar)\b'
+    r'.{0,30}?'
+    r'\b(?:(?:la\s+)?vuln(?:erabilidad)?|cve|exploit)\b'
+    r'.{0,40}?'
+    r'(CVE-\d{4}-\d{4,7}|[\w\s/.-]{3,40}?)'
+    r'\s+(?:en|on|against|contra|sobre|in)\s+'
+    r'(https?://\S+|[\w.\-:]+)',
+    re.IGNORECASE
+)
+
 # ── Ingeniería inversa / bypass automático (sin LLM) ─────────────────────────
 _RE_TRIGGER = re.compile(
     r'\b(?:bypass(?:ea|ear)?|crack(?:ea|ear)?|reversea?r?|revierte|revertir|'
@@ -2448,6 +2812,221 @@ def run_pentest_phases(target: str, log: LogWriter, cwd: str, cache: ScanCache) 
     return summary
 
 
+# ── Pipeline: explota vulnerabilidad (investigación + búsqueda + PoC) ─────────
+def _fetch_cve_details(cve_id: str) -> dict:
+    """
+    Consulta detalles de una CVE usando cveawg.circl.lu (primaria)
+    con fallback a NIST NVD.
+    Retorna dict con: description, cvss, severity, products, references.
+    """
+    result = {"description": "", "cvss": "", "severity": "", "products": [], "references": []}
+    try:
+        import requests as _rq
+    except ImportError:
+        return result
+
+    # ── Fuente 1: cveawg.circl.lu (rápida, sin rate-limit) ──
+    try:
+        r = _rq.get(f"https://cveawg.circl.lu/api/cve/{cve_id}", timeout=12)
+        if r.ok:
+            data = r.json()
+            # Descripción
+            cna = data.get("containers", {}).get("cna", {})
+            descs = cna.get("descriptions", data.get("cveMetadata", {}).get("descriptions", []))
+            if descs:
+                for d in descs:
+                    if d.get("lang", "en").startswith("en"):
+                        result["description"] = d.get("value", "")[:500]
+                        break
+                if not result["description"]:
+                    result["description"] = descs[0].get("value", "")[:500]
+            # Productos afectados
+            affected = cna.get("affected", [])
+            for a in affected[:5]:
+                vendor = a.get("vendor", "?")
+                product = a.get("product", "?")
+                versions = [v.get("version", "?") for v in a.get("versions", [])[:3]]
+                result["products"].append(f"{vendor}/{product} {', '.join(versions)}")
+            # Métricas CVSS
+            metrics = cna.get("metrics", [])
+            for m in metrics:
+                for key in ("cvssV3_1", "cvssV3_0", "cvssV31", "cvssV30", "cvssV2_0"):
+                    if key in m:
+                        cv = m[key]
+                        result["cvss"] = str(cv.get("baseScore", ""))
+                        result["severity"] = cv.get("baseSeverity", "").upper()
+                        break
+            # Referencias
+            refs = cna.get("references", [])
+            result["references"] = [ref.get("url", "") for ref in refs[:5] if ref.get("url")]
+            if result["description"]:
+                return result
+    except Exception:
+        pass
+
+    # ── Fuente 2: NIST NVD (fallback) ──
+    try:
+        r = _rq.get(
+            f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={cve_id}",
+            timeout=15,
+            headers={"User-Agent": "HackerAgent/2.0"}
+        )
+        if r.ok:
+            data = r.json()
+            vulns = data.get("vulnerabilities", [])
+            if vulns:
+                cve_data = vulns[0].get("cve", {})
+                # Descripción
+                for d in cve_data.get("descriptions", []):
+                    if d.get("lang") == "en":
+                        result["description"] = d.get("value", "")[:500]
+                        break
+                # CVSS
+                metrics = cve_data.get("metrics", {})
+                for ver in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+                    mlist = metrics.get(ver, [])
+                    if mlist:
+                        cv = mlist[0].get("cvssData", {})
+                        result["cvss"] = str(cv.get("baseScore", ""))
+                        result["severity"] = cv.get("baseSeverity", "").upper()
+                        break
+                # Referencias
+                refs = cve_data.get("references", [])
+                result["references"] = [r2.get("url", "") for r2 in refs[:5] if r2.get("url")]
+    except Exception:
+        pass
+    return result
+
+
+def _normalize_vuln_term(term: str) -> str:
+    """Normaliza nombres comunes de vulns a términos de búsqueda."""
+    aliases = {
+        "log4shell": "CVE-2021-44228", "log4j": "CVE-2021-44228",
+        "eternalblue": "CVE-2017-0144", "eternal blue": "CVE-2017-0144",
+        "shellshock": "CVE-2014-6271", "shell shock": "CVE-2014-6271",
+        "heartbleed": "CVE-2014-0160", "heart bleed": "CVE-2014-0160",
+        "bluekeep": "CVE-2019-0708", "blue keep": "CVE-2019-0708",
+        "spring4shell": "CVE-2022-22965", "springshell": "CVE-2022-22965",
+        "dirty pipe": "CVE-2022-0847", "dirtypipe": "CVE-2022-0847",
+        "dirty cow": "CVE-2016-5195", "dirtycow": "CVE-2016-5195",
+        "pwnkit": "CVE-2021-4034", "pkexec": "CVE-2021-4034",
+        "zerologon": "CVE-2020-1472", "zero logon": "CVE-2020-1472",
+        "proxylogon": "CVE-2021-26855", "proxy logon": "CVE-2021-26855",
+        "proxyshell": "CVE-2021-34473", "proxy shell": "CVE-2021-34473",
+        "printnightmare": "CVE-2021-34527", "print nightmare": "CVE-2021-34527",
+        "smbghost": "CVE-2020-0796", "smb ghost": "CVE-2020-0796",
+    }
+    key = term.strip().lower()
+    return aliases.get(key, term.strip())
+
+
+def run_exploit_vuln_pipeline(vuln_term: str, target: str, log: LogWriter,
+                              cwd: str, cache: ScanCache) -> str:
+    """
+    Pipeline de investigación + búsqueda de exploits para una vulnerabilidad.
+    1. Si es CVE → consulta detalles (cveawg / NVD)
+    2. Busca exploits (exploit_db + metasploit + searchsploit)
+    3. Retorna resumen compacto para el LLM
+    """
+    log.section(f"Exploit pipeline → {vuln_term} en {target}")
+    all_results = []
+    exploits_found = 0
+
+    # ── Normalizar nombre de vuln ──
+    original_term = vuln_term.strip()
+    vuln_term = _normalize_vuln_term(vuln_term)
+    is_cve = bool(re.match(r'CVE-\d{4}-\d{4,7}', vuln_term, re.I))
+    if is_cve:
+        vuln_term = vuln_term.upper()
+    search_term = vuln_term
+
+    # ── FASE 1: Detalles de la CVE ────────────────────────────────────────────
+    print(f"\n  {CYAN}{BOLD}▶ FASE 1 — Investigación de la vulnerabilidad{R}\n")
+    cve_info = {}
+    if is_cve:
+        print(f"  {DIM}Consultando detalles de {vuln_term}...{R}")
+        cve_info = _fetch_cve_details(vuln_term)
+        if cve_info.get("description"):
+            sev_color = RED if cve_info.get("severity") in ("CRITICAL", "HIGH") else YELLOW
+            print(f"  {WHITE}{BOLD}{vuln_term}{R}")
+            if cve_info.get("cvss"):
+                print(f"  {sev_color}CVSS: {cve_info['cvss']} {cve_info.get('severity', '')}{R}")
+            print(f"  {DIM}{cve_info['description'][:300]}{R}")
+            if cve_info.get("products"):
+                print(f"  {DIM}Productos: {', '.join(cve_info['products'][:3])}{R}")
+            if cve_info.get("references"):
+                for ref in cve_info["references"][:3]:
+                    print(f"  {DIM}  → {ref}{R}")
+            all_results.append(
+                f"[CVE DETAILS]\n{vuln_term}\n"
+                f"CVSS: {cve_info.get('cvss', 'N/A')} ({cve_info.get('severity', 'N/A')})\n"
+                f"Descripción: {cve_info['description']}\n"
+                f"Productos: {', '.join(cve_info.get('products', []))}\n"
+                f"Referencias: {chr(10).join(cve_info.get('references', []))}"
+            )
+            log.command(f"CVE lookup {vuln_term}", str(cve_info), "", 0)
+        else:
+            print(f"  {YELLOW}⚠ No se encontraron detalles para {vuln_term} en APIs públicas{R}")
+            all_results.append(f"[CVE DETAILS]\nNo se encontraron detalles de {vuln_term}")
+    else:
+        print(f"  {WHITE}Búsqueda por término: \"{vuln_term}\"{R}")
+        if original_term.lower() != vuln_term.lower():
+            print(f"  {DIM}(normalizado de \"{original_term}\" → \"{vuln_term}\"){R}")
+        all_results.append(f"[VULN TERM]\nBúsqueda: {vuln_term}")
+
+    # ── FASE 2: Búsqueda de exploits ──────────────────────────────────────────
+    print(f"\n  {CYAN}{BOLD}▶ FASE 2 — Búsqueda de exploits existentes{R}\n")
+
+    # 2a. Exploit-DB via skill
+    edb_args = {"cve": vuln_term} if is_cve else {"search": vuln_term}
+    print_command(f"SKILL:exploit_db {' '.join(f'{k}={v}' for k,v in edb_args.items())}")
+    edb_result = run_skill("exploit_db", **edb_args)
+    edb_out = edb_result.get("output", "")
+    edb_findings = edb_result.get("findings", [])
+    edb_exploits = [f for f in edb_findings if f.get("type") in ("exploit_found", "edb_exploit")]
+    exploits_found += len(edb_exploits)
+    print_output(edb_out[:2000], "", 0 if edb_result.get("success") else 1)
+    log.command(f"SKILL:exploit_db {edb_args}", edb_out[:3000], "", 0)
+    all_results.append(f"[EXPLOIT-DB]\n{edb_out[:3000]}")
+
+    # 2b. Metasploit search via skill
+    msf_args = {"mode": "search"}
+    if is_cve:
+        msf_args["cve"] = vuln_term
+    else:
+        msf_args["cve"] = vuln_term  # mode=search acepta término libre también
+    print_command(f"SKILL:metasploit mode=search {'cve' if is_cve else 'query'}={vuln_term}")
+    msf_result = run_skill("metasploit", **msf_args)
+    msf_out = msf_result.get("output", "")
+    msf_findings = msf_result.get("findings", [])
+    msf_modules = [f for f in msf_findings if f.get("type") in ("msf_module", "exploit_found", "module_found")]
+    exploits_found += len(msf_modules)
+    print_output(msf_out[:2000], "", 0 if msf_result.get("success") else 1)
+    log.command(f"SKILL:metasploit mode=search {vuln_term}", msf_out[:3000], "", 0)
+    all_results.append(f"[METASPLOIT]\n{msf_out[:3000]}")
+
+    # 2c. searchsploit directo (fallback/complemento)
+    ssploit_cmd = f'searchsploit "{search_term}" 2>/dev/null | head -30'
+    print_command(ssploit_cmd)
+    ss_out, ss_err, ss_code = run_command(ssploit_cmd, cwd)
+    ss_text = (ss_out or ss_err or "").strip()
+    if ss_text and "No Results" not in ss_text:
+        # Contar líneas con resultados (no headers)
+        ss_lines = [l for l in ss_text.split("\n") if l.strip() and not l.startswith("---") and "Exploit Title" not in l]
+        exploits_found += len(ss_lines)
+    print_output(ss_out, ss_err, ss_code)
+    log.command(ssploit_cmd, ss_out or "", ss_err or "", ss_code)
+    all_results.append(f"[SEARCHSPLOIT]\n{ss_text[:2000]}")
+
+    # ── Resumen ────────────────────────────────────────────────────────────────
+    summary = "\n\n".join(all_results)
+    if exploits_found > 0:
+        print(f"\n  {GREEN}{BOLD}✓ {exploits_found} exploit(s) encontrado(s) — pasando al modelo para explotación contra {target}...{R}\n")
+    else:
+        print(f"\n  {YELLOW}{BOLD}⚠ No se encontraron exploits existentes — el modelo intentará crear un PoC de verificación...{R}\n")
+    return summary
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="HackerAgent v2")
@@ -2464,10 +3043,17 @@ def main():
     parser.add_argument("--host",          default="0.0.0.0",
                         help="Host para la interfaz web (default: 0.0.0.0)")
     parser.add_argument("--backend",       "-b",
-                        choices=["ollama", "lmstudio"],
+                        choices=["ollama", "lmstudio", "deepseek"],
                         default=None,
-                        help="Backend LLM: ollama o lmstudio (si no se indica, se pregunta)")
+                        help="Backend LLM: ollama, lmstudio o deepseek (si no se indica, se pregunta)")
+    parser.add_argument("--deepseek",      action="store_true",
+                        help="Atajo: usar DeepSeek API como backend (equivale a --backend deepseek)")
+    parser.add_argument("--verbose",       action="store_true",
+                        help="Mostrar logs detallados y respuesta cruda del LLM")
     args = parser.parse_args()
+
+    global VERBOSE
+    VERBOSE = args.verbose
 
     # ── Dispatch web mode ──────────────────────────────────────────────
     if args.web:
@@ -2476,7 +3062,7 @@ def main():
         except ImportError as _e:
             print(f"{RED}✗ Error importando web_server.py: {_e}{R}")
             sys.exit(1)
-        _web_launch(host=args.host, port=args.port)
+        _web_launch(host=args.host, port=args.port, verbose=args.verbose)
         return
 
     tool_confs    = load_tool_confs()
@@ -2522,7 +3108,10 @@ def main():
 
     # ── Selección de backend LLM ──────────────────────────────────────
     global LLM_BACKEND
-    if args.backend:
+    if args.deepseek:
+        LLM_BACKEND = "deepseek"
+        print(f"  {GREEN}✓ Backend (CLI):{R} {CYAN}{BOLD}DeepSeek API{R}\n")
+    elif args.backend:
         LLM_BACKEND = args.backend
         print(f"  {GREEN}✓ Backend (CLI):{R} {CYAN}{BOLD}{_backend_display_name()}{R}\n")
     else:
@@ -2706,6 +3295,75 @@ def main():
                 print(f"  {DIM}Ejecuta un SKILL:shodan_query, SKILL:scan_red o SKILL:subfinder_enum primero.{R}\n")
             continue
 
+        # ── Explotar vulnerabilidad por nombre/CVE en target ───────────────────
+        _ev_match = _EXPLOIT_VULN_TRIGGER.search(user_input)
+        # Evitar conflicto: NO activar si es solo "explotar <N>" (numérico)
+        if _ev_match and not re.match(r'^(?:explotar|exploit|poc)\s+#?\d+$', user_input.strip(), re.I):
+            ev_vuln = _ev_match.group(1).strip().rstrip('.,;:')
+            ev_target = _ev_match.group(2).strip().rstrip('.,;:')
+            print(f"\n  {MAGENTA}{BOLD}▶ Investigando vulnerabilidad: {ev_vuln} → {ev_target}{R}")
+            log.separator()
+            log.user_input(user_input)
+            if not _SKILLS_AVAILABLE:
+                print(f"  {RED}✗ Skills no disponibles.{R}")
+                continue
+            ev_summary = run_exploit_vuln_pipeline(ev_vuln, ev_target, log, cwd, cache)
+            # Ingest findings en project_state
+            # (los skills ya los ingestan internamente, pero re-consolidamos)
+            # Determinar si encontró exploits
+            has_exploits = any(kw in ev_summary.lower() for kw in [
+                "exploit_found", "edb-", "exploit/", "auxiliary/",
+                "msf_module", "module_found", "searchsploit"
+            ])
+            is_cve = bool(re.match(r'CVE-\d{4}-\d{4,7}', ev_vuln.strip(), re.I))
+            vuln_term_clean = _normalize_vuln_term(ev_vuln)
+            if has_exploits:
+                # Hay exploits → LLM los ejecuta contra el target
+                if not ev_target.startswith("http"):
+                    ev_target_url = f"https://{ev_target}"
+                else:
+                    ev_target_url = ev_target
+                user_input = (
+                    f"[EXPLOIT PIPELINE COMPLETADO — EXPLOITS ENCONTRADOS]\n"
+                    f"Vulnerabilidad: {vuln_term_clean}\n"
+                    f"Target: {ev_target}\n\n"
+                    f"HALLAZGOS:\n{ev_summary[:7000]}\n\n"
+                    f"INSTRUCCIONES:\n"
+                    f"Se encontraron exploits para {vuln_term_clean}. "
+                    f"Ejecuta el exploit MÁS apropiado contra {ev_target} usando:\n"
+                    f"1. Si hay módulo Metasploit: SKILL:metasploit mode=exploit target={ev_target} "
+                    f"module=<modulo> lhost=<tu_ip>\n"
+                    f"2. Si hay script de Exploit-DB: descárgalo con searchsploit -m <EDB-ID> y ejecútalo\n"
+                    f"3. Alternativamente: crea un PoC mínimo con curl/python para VERIFICAR la vuln\n"
+                    f"4. Concluye: TRUE POSITIVE (explotable) o FALSE POSITIVE\n"
+                    f"Emite los comandos concretos AHORA."
+                )
+            else:
+                # No hay exploits → LLM crea un PoC
+                cve_desc = ""
+                if is_cve:
+                    cve_info = _fetch_cve_details(vuln_term_clean)
+                    cve_desc = cve_info.get("description", "")
+                user_input = (
+                    f"[EXPLOIT PIPELINE COMPLETADO — SIN EXPLOITS EXISTENTES]\n"
+                    f"Vulnerabilidad: {vuln_term_clean}\n"
+                    f"Target: {ev_target}\n"
+                    f"{'Descripción CVE: ' + cve_desc + chr(10) if cve_desc else ''}\n"
+                    f"HALLAZGOS:\n{ev_summary[:5000]}\n\n"
+                    f"INSTRUCCIONES:\n"
+                    f"NO se encontraron exploits públicos para {vuln_term_clean}. "
+                    f"Debes:\n"
+                    f"1. Analizar la vulnerabilidad y entender el vector de ataque\n"
+                    f"2. Crear un script de verificación/PoC usando:\n"
+                    f"   SKILL:code_dev request=\"PoC para verificar {vuln_term_clean} en {ev_target}\" "
+                    f"kind=exploit language=python\n"
+                    f"3. El script debe: conectar a {ev_target}, probar la vulnerabilidad, "
+                    f"y reportar si es explotable o no\n"
+                    f"4. Concluye: TRUE POSITIVE (vulnerable) o FALSE POSITIVE (no afectado)\n"
+                    f"Emite los comandos AHORA."
+                )
+            # Cae al bloque del modelo (sin continue)
+
         # ── Explotar/verificar vulnerabilidad por número ──────────────────────
         _em = re.match(
             r'^(?:explotar|verificar|exploit|verifica|poc)\s+(?:(?:la\s+)?(?:vuln(?:erabilidad)?\s+))?#?(\d+)$',
@@ -2811,9 +3469,9 @@ def main():
                 save_session(session_name, conversation, model, target_dir)
             continue
 
-        # ── Cambio de backend (Ollama ↔ LM Studio) ───────────────────────────
+        # ── Cambio de backend (Ollama / LM Studio / DeepSeek) ────────────────
         _backend_match = re.match(
-            r'^(?:backend|cambiar backend|switch backend|usa backend)\s*(ollama|lmstudio|lm\s*studio)?$',
+            r'^(?:backend|cambiar backend|switch backend|usa backend)\s*(ollama|lmstudio|lm\s*studio|deepseek|deep\s*seek)?$',
             user_input.strip(), re.I,
         )
         _backend_bare = user_input.lower().strip() in ("backend", "backends")
@@ -2821,23 +3479,34 @@ def main():
             # Mostrar estado actual
             _o_ok, _o_models = check_ollama()
             _l_ok, _l_models = check_lmstudio()
+            _d_ok, _d_models = check_deepseek()
             _o_st = f"{GREEN}✓ online ({len(_o_models)} modelos){R}" if _o_ok else f"{RED}✗ offline{R}"
             _l_st = f"{GREEN}✓ online ({len(_l_models)} modelos){R}" if _l_ok else f"{RED}✗ offline{R}"
+            _d_st = f"{GREEN}✓ API key configurada ({len(_d_models)} modelos){R}" if _d_ok else f"{RED}✗ sin API key{R}"
             print(f"\n  {CYAN}{BOLD}  BACKENDS LLM{R}")
-            separator("─", DIM, 50)
+            separator("─", DIM, 55)
             act_o = f"  {GREEN}← activo{R}" if LLM_BACKEND == "ollama" else ""
             act_l = f"  {GREEN}← activo{R}" if LLM_BACKEND == "lmstudio" else ""
-            print(f"    {BOLD}1.{R}  🦙 {CYAN}Ollama{R}     {DIM}({OLLAMA_URL}){R}  {_o_st}{act_o}")
-            print(f"    {BOLD}2.{R}  🖥️  {CYAN}LM Studio{R}  {DIM}({LMSTUDIO_URL}){R}  {_l_st}{act_l}")
-            separator("─", DIM, 50)
+            act_d = f"  {GREEN}← activo{R}" if LLM_BACKEND == "deepseek" else ""
+            print(f"    {BOLD}1.{R}  🦙 {CYAN}Ollama{R}        {DIM}({OLLAMA_URL}){R}  {_o_st}{act_o}")
+            print(f"    {BOLD}2.{R}  🖥️  {CYAN}LM Studio{R}     {DIM}({LMSTUDIO_URL}){R}  {_l_st}{act_l}")
+            print(f"    {BOLD}3.{R}  🌐 {CYAN}DeepSeek API{R}  {DIM}({DEEPSEEK_API_URL}){R}  {_d_st}{act_d}")
+            separator("─", DIM, 55)
 
             new_be = None
             if _backend_match and _backend_match.group(1):
                 raw = _backend_match.group(1).strip().lower().replace(" ", "")
-                new_be = "lmstudio" if "lm" in raw or "studio" in raw else "ollama"
+                if "deep" in raw or "seek" in raw:
+                    new_be = "deepseek"
+                elif "lm" in raw or "studio" in raw:
+                    new_be = "lmstudio"
+                else:
+                    new_be = "ollama"
             else:
-                sel = input(f"  {CYAN}?{R} Selecciona backend [1=Ollama / 2=LM Studio]: ").strip()
-                if sel == "2":
+                sel = input(f"  {CYAN}?{R} Selecciona backend [1=Ollama / 2=LM Studio / 3=DeepSeek]: ").strip()
+                if sel == "3":
+                    new_be = "deepseek"
+                elif sel == "2":
                     new_be = "lmstudio"
                 elif sel == "1":
                     new_be = "ollama"
@@ -2846,11 +3515,11 @@ def main():
                     continue
 
             if new_be:
-                _check_fn = check_lmstudio if new_be == "lmstudio" else check_ollama
-                _be_ok, _be_models = _check_fn()
+                _check_fns = {"ollama": check_ollama, "lmstudio": check_lmstudio, "deepseek": check_deepseek}
+                _be_names  = {"ollama": "Ollama", "lmstudio": "LM Studio", "deepseek": "DeepSeek API"}
+                _be_ok, _be_models = _check_fns[new_be]()
                 if not _be_ok:
-                    _be_name = "LM Studio" if new_be == "lmstudio" else "Ollama"
-                    print(f"  {RED}✗ {_be_name} no está online.{R}")
+                    print(f"  {RED}✗ {_be_names[new_be]} no está disponible.{R}")
                 else:
                     LLM_BACKEND = new_be
                     # Re-seleccionar el mejor modelo del nuevo backend
@@ -3209,8 +3878,15 @@ def main():
                 break
 
             thinking      = response.get("thinking", "")
-            commands      = response.get("commands", [])
+            cur_target = ""
+            if "project_state" in locals() and project_state and getattr(project_state, "target", None):
+                cur_target = project_state.target
+            elif "pt_target" in locals() and pt_target:
+                cur_target = pt_target
+            commands      = sanitize_commands(response.get("commands", []), current_target=cur_target)
             message       = response.get("message", "")
+            if not message:
+                message = response.get("summary", "") or response.get("content", "") or response.get("response", "")
             needs_confirm = response.get("requires_confirmation", False)
             task_done     = response.get("task_complete", False)
             risk          = response.get("risk_level", "low")
@@ -3219,6 +3895,17 @@ def main():
             browser_url   = response.get("open_browser", "")
             fetch_target  = response.get("fetch_url", "")
             json_error    = response.get("_json_parse_error", False)
+
+            # Sanitizar tipos de datos para prevenir crashes
+            if isinstance(thinking, dict):
+                thinking = thinking.get("content", str(thinking))
+            elif not isinstance(thinking, str):
+                thinking = str(thinking) if thinking is not None else ""
+
+            if isinstance(message, dict):
+                message = message.get("content", str(message))
+            elif not isinstance(message, str):
+                message = str(message) if message is not None else ""
 
             if message and message.strip().startswith("{"):
                 message = ""

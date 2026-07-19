@@ -9,6 +9,7 @@ Para desarrollo OFENSIVO conviene un modelo sin censura (dolphin*, *-uncensored)
 para código general conviene un modelo "coder" o de razonamiento.
 """
 import os
+from skills.llm_client import available_models
 import re
 import shutil
 import subprocess
@@ -93,6 +94,11 @@ def _size_b(name: str) -> float:
 
 
 def list_ollama_models() -> tuple:
+    # Kept under the historical name for callers, but now returns whichever
+    # configured backend is active (Ollama, DeepSeek or LM Studio).
+    backend, shared_models = available_models()
+    if shared_models:
+        return shared_models, backend
     if requests is None:
         return [], "módulo 'requests' no disponible"
     base = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")

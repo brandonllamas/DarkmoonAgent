@@ -431,19 +431,26 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
 
 /* ── Command block ───────────────────────── */
 .cmd-block{
-  background:var(--bg2);border:1px solid var(--border);
+  background:#090a0f;border:1px solid var(--border2);
   border-radius:var(--r);overflow:hidden;
-  max-width:860px;width:100%;margin:0 auto 2px;
+  max-width:860px;width:100%;margin:12px auto;
+  box-shadow:0 4px 20px rgba(0,0,0,0.35);
   animation:msg-in .2s ease both;
 }
 .cmd-header{
-  display:flex;align-items:center;gap:8px;padding:7px 12px;
-  background:var(--bg3);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:8px;padding:8px 12px;
+  background:#11131a;border-bottom:1px solid var(--border2);
 }
-.cmd-prompt{color:var(--green);font-size:12px;font-family:'JetBrains Mono',monospace;flex-shrink:0;}
+.cmd-dots{display:flex;gap:5px;align-items:center;margin-right:6px;}
+.cmd-dot{width:9px;height:9px;border-radius:50%;}
+.cmd-dot.red{background:#ff5f56;}
+.cmd-dot.yellow{background:#ffbd2e;}
+.cmd-dot.green{background:#27c93f;}
+.cmd-prompt{color:var(--green);font-size:12.5px;font-family:'JetBrains Mono',monospace;flex-shrink:0;font-weight:700;}
 .cmd-text{
   flex:1;font-size:12px;font-family:'JetBrains Mono',monospace;
-  color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  color:#e1e4ec;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-weight:500;
 }
 .cmd-status{font-size:11px;font-weight:700;flex-shrink:0;font-family:'JetBrains Mono',monospace;}
 .cmd-status.ok {color:var(--green);}
@@ -456,16 +463,18 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
   font-family:'JetBrains Mono',monospace;
 }
 .cmd-toggle-btn{
-  background:none;border:none;color:var(--text4);cursor:pointer;
+  background:none;border:none;color:var(--text3);cursor:pointer;
   font-size:10px;padding:2px 7px;border-radius:3px;transition:var(--tr);
+  font-weight:500;
 }
-.cmd-toggle-btn:hover{background:var(--bg5);color:var(--text3);}
+.cmd-toggle-btn:hover{background:var(--bg5);color:var(--text);}
 .cmd-out{max-height:0;overflow:hidden;transition:max-height .3s ease;}
 .cmd-out.open{max-height:1000px;}
 .cmd-out pre{
-  padding:10px 12px;font-size:11px;font-family:'JetBrains Mono',monospace;
-  color:var(--text3);white-space:pre-wrap;word-break:break-all;
-  max-height:450px;overflow-y:auto;line-height:1.5;
+  padding:12px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;
+  color:#ccd0da;white-space:pre-wrap;word-break:break-all;
+  max-height:450px;overflow-y:auto;line-height:1.6;
+  background:#090a0f;
 }
 
 /* ── Skill block ─────────────────────────── */
@@ -1623,19 +1632,24 @@ function appendCmdBlock(cmd,stdout,stderr,code,cached){
   const hasOut=rawOut.length>0;
   // Auto-open if there's output and not still running
   const isHistoryLoad = S._isHistoryLoad;
-  const shouldOpen=!running&&hasOut&&!isHistoryLoad;
+  const shouldOpen=true;
   // Return info badge
   const retInfo=(!running&&hasOut)?
     `<span class="cmd-ret-info">↩ ${outLines} línea${outLines!==1?'s':''} · ${outBytes>1024?(outBytes/1024).toFixed(1)+'KB':outBytes+'B'}</span>`:'';
   div.id=id+'_blk';
-  const outDivClass = shouldOpen ? 'cmd-out open' : 'cmd-out';
+  const outDivClass = 'cmd-out open';
   div.innerHTML=`
     <div class="cmd-header" style="cursor:pointer;" onclick="toggleOut('${id}_out')">
+      <div class="cmd-dots">
+        <span class="cmd-dot red"></span>
+        <span class="cmd-dot yellow"></span>
+        <span class="cmd-dot green"></span>
+      </div>
       <span class="cmd-prompt">❯</span>
       <span class="cmd-text" title="${esc(cmd)}">${esc(cmd)}</span>
       ${cached?'<span class="cmd-cache-tag">caché</span>':''}
       <span class="cmd-status ${sc}" id="${id}_st">${st}</span>
-      <button class="cmd-toggle-btn" >▾ output</button>
+      <button class="cmd-toggle-btn">▾ output</button>
     </div>
     <div class="${outDivClass}" id="${id}_out"><pre>${esc(out)}</pre></div>`;
   chat.appendChild(div);autoScroll();

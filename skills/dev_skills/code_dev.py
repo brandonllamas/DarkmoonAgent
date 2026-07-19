@@ -16,6 +16,7 @@ import shutil
 import importlib.util
 from pathlib import Path
 from datetime import datetime
+from skills.llm_client import chat_text
 
 try:
     import requests
@@ -121,19 +122,9 @@ def _load_advisor():
         return None
 
 def _ollama_chat(model: str, messages: list, timeout: int = 600) -> tuple:
-    if requests is None:
-        return "", "módulo 'requests' no disponible"
-    payload = {"model": model, "messages": messages, "stream": False,
-               "options": {"temperature": 0.15, "num_ctx": 32768}}
+    """Compatibilidad histórica; el cliente común elige Ollama/DeepSeek/LM Studio."""
     try:
-        r = requests.post(_ollama_url(), json=payload, timeout=timeout)
-        if not r.ok:
-            try:
-                err = r.json().get("error", r.text[:200])
-            except Exception:
-                err = r.text[:200]
-            return "", f"Ollama {r.status_code}: {err}"
-        return r.json().get("message", {}).get("content", ""), ""
+        return chat_text(messages, model, temperature=.15, max_tokens=32768, timeout=timeout), ""
     except Exception as e:
         return "", str(e)
 

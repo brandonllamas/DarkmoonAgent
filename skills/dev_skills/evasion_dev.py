@@ -13,6 +13,7 @@ import re
 import json
 import importlib.util
 from pathlib import Path
+from skills.llm_client import chat_text, available_models
 from datetime import datetime
 
 try:
@@ -656,19 +657,16 @@ def _ollama_url() -> str:
 
 
 def _ollama_chat(model: str, messages: list, timeout: int = 600) -> tuple:
-    if _req is None:
-        return "", "módulo 'requests' no disponible"
-    payload = {"model": model, "messages": messages, "stream": False,
-               "options": {"temperature": 0.15, "num_ctx": 16384}}
     try:
-        r = _req.post(_ollama_url(), json=payload, timeout=timeout)
-        r.raise_for_status()
-        return r.json().get("message", {}).get("content", ""), ""
+        return chat_text(messages, model, temperature=.15, max_tokens=16384, timeout=timeout), ""
     except Exception as e:
         return "", str(e)
 
 
 def _best_model() -> str:
+    backend, shared_models = available_models()
+    if backend == "deepseek":
+        return shared_models[0] if shared_models else "deepseek-chat"
     if _req is None:
         return ""
     base = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")

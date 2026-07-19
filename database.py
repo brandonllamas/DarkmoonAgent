@@ -14,6 +14,11 @@ def get_db():
         _local.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         _local.conn.row_factory = sqlite3.Row
         _local.conn.execute("PRAGMA foreign_keys = ON;")
+        # The Web UI writes an event for each streamed step. WAL lets those
+        # writes coexist with reads for the sidebar/history without UI stalls.
+        _local.conn.execute("PRAGMA journal_mode = WAL;")
+        _local.conn.execute("PRAGMA synchronous = NORMAL;")
+        _local.conn.execute("PRAGMA busy_timeout = 5000;")
     return _local.conn
 
 def init_db():
@@ -85,6 +90,15 @@ def init_db():
             UNIQUE(project_id, domain),
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
+
+        CREATE INDEX IF NOT EXISTS idx_sessions_project_saved
+            ON sessions(project_id, saved_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_messages_session_role
+            ON messages(session_id, role, id);
+        CREATE INDEX IF NOT EXISTS idx_events_session_id
+            ON events(session_id, id);
+        CREATE INDEX IF NOT EXISTS idx_findings_project_severity
+            ON findings(project_id, severity);
     """)
     conn.commit()
 
@@ -153,19 +167,107 @@ def delete_session(session_id: str):
     conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
 
-# --- Messages ---
-def save_messages(session_id: str, messages: List[Dict[str, Any]]):
+def rename_session(session_id: str, new_session_id: str) -> bool:
+    """Rename a session while preserving messages, events and foreign keys."""
     conn = get_db()
-    conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-    for msg in messages:
-        conn.execute("INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
-                     (session_id, msg.get("role", ""), msg.get("content", ""), datetime.now().isoformat()))
-    conn.commit()
+    try:
+        old = conn.execute("SELECT project_id, model FROM sessions WHERE id = ?",
+                           (session_id,)).fetchone()
+        if not old:
+            return False
+        # Foreign keys do not cascade primary-key updates. Create the new
+        # parent first, move children, then remove the old parent atomically.
+        with conn:
+            conn.execute("INSERT INTO sessions (id, project_id, model, saved_at) VALUES (?, ?, ?, ?)",
+                         (new_session_id, old["project_id"], old["model"], datetime.now().isoformat()))
+            conn.execute("UPDATE messages SET session_id = ? WHERE session_id = ?",
+                         (new_session_id, session_id))
+            conn.execute("UPDATE events SET session_id = ? WHERE session_id = ?",
+                         (new_session_id, session_id))
+            conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+def get_session_summaries(project_id: str) -> List[Dict[str, Any]]:
+    """Return sidebar data in one query instead of one count per session."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT s.id, s.saved_at, s.model,
+               SUM(CASE WHEN m.role = 'user' THEN 1 ELSE 0 END) AS turns,
+               (SELECT content FROM messages pm
+                  WHERE pm.session_id = s.id AND pm.role = 'user'
+                  ORDER BY pm.id ASC LIMIT 1) AS first_prompt
+          FROM sessions s
+          LEFT JOIN messages m ON m.session_id = s.id
+         WHERE s.project_id = ?
+         GROUP BY s.id
+         ORDER BY s.saved_at DESC
+    """, (project_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+# --- Messages ---
+def _is_runtime_context_message(message: Dict[str, Any]) -> bool:
+    """Exclude transient LLM-context compression markers from chat history."""
+    content = str(message.get("content", ""))
+    if content.startswith("[RESUMEN COMPRIMIDO") or content.startswith("[CONTEXTO TRUNCADO"):
+        return True
+    # summarize_if_needed adds this synthetic acknowledgement for the model.
+    return "Resumen recibido. Contin" in content and "contexto comprimido" in content
+
+def _message_key(message: Dict[str, Any]) -> tuple[str, str]:
+    return str(message.get("role", "")), str(message.get("content", ""))
+
+def save_messages(session_id: str, messages: List[Dict[str, Any]]):
+    """
+    Persist the complete user-visible transcript append-only.
+
+    The model may replace its in-memory context with a short summary. Replacing
+    the database with that working context was deleting the older chat turns on
+    refresh. We instead find its overlap with the saved transcript and append
+    only genuinely new messages.
+    """
+    conn = get_db()
+    incoming = [m for m in messages if not _is_runtime_context_message(m)]
+    existing = get_messages(session_id)
+    if not incoming:
+        return
+
+    existing_keys = [_message_key(m) for m in existing]
+    incoming_keys = [_message_key(m) for m in incoming]
+    append_from = 0
+
+    if existing_keys:
+        # Normal turns share a prefix. After context compression, the latest
+        # saved messages appear as a suffix somewhere in the compact context.
+        if incoming_keys[:len(existing_keys)] == existing_keys:
+            append_from = len(existing_keys)
+        else:
+            max_overlap = min(len(existing_keys), len(incoming_keys))
+            for size in range(max_overlap, 0, -1):
+                tail = existing_keys[-size:]
+                start = next(
+                    (i for i in range(len(incoming_keys) - size + 1)
+                     if incoming_keys[i:i + size] == tail),
+                    None,
+                )
+                if start is not None:
+                    append_from = start + size
+                    break
+
+    new_messages = incoming[append_from:]
+    if not new_messages:
+        return
+    with conn:
+        for msg in new_messages:
+            conn.execute("INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                         (session_id, msg.get("role", ""), msg.get("content", ""), datetime.now().isoformat()))
 
 def get_messages(session_id: str) -> List[Dict[str, Any]]:
     conn = get_db()
     rows = conn.execute("SELECT role, content FROM messages WHERE session_id = ? ORDER BY id ASC", (session_id,)).fetchall()
-    return [{"role": r["role"], "content": r["content"]} for r in rows]
+    return [m for m in ({"role": r["role"], "content": r["content"]} for r in rows)
+            if not _is_runtime_context_message(m)]
 
 def get_turn_count(session_id: str) -> int:
     conn = get_db()

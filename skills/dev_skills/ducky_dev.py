@@ -17,6 +17,7 @@ import json
 import shutil
 import subprocess
 import importlib.util
+from skills.llm_client import chat_text, available_models
 from pathlib import Path
 from datetime import datetime
 
@@ -645,20 +646,16 @@ def _ollama_url() -> str:
 
 
 def _ollama_chat(model: str, messages: list, timeout: int = 300) -> str:
-    if requests is None:
-        return ""
     try:
-        r = requests.post(_ollama_url(),
-                          json={"model": model, "messages": messages, "stream": False,
-                                "options": {"temperature": 0.15, "num_ctx": 8192}},
-                          timeout=timeout)
-        r.raise_for_status()
-        return r.json().get("message", {}).get("content", "")
+        return chat_text(messages, model, temperature=.15, max_tokens=8192, timeout=timeout)
     except Exception as e:
-        return f"[Ollama error: {e}]"
+        return f"[LLM error: {e}]"
 
 
 def _best_model() -> str:
+    backend, shared_models = available_models()
+    if backend == "deepseek":
+        return shared_models[0] if shared_models else "deepseek-chat"
     advisor_path = Path(__file__).with_name("model_advisor.py")
     try:
         spec = importlib.util.spec_from_file_location("_d_advisor", advisor_path)

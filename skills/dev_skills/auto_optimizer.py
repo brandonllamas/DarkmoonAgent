@@ -25,6 +25,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from skills.llm_client import available_models
 
 try:
     import requests as _req
@@ -173,6 +174,9 @@ def detect_task(user_input: str) -> str:
 def _check_backend() -> tuple[bool, str, float]:
     """Verifica el backend y mide latencia. Retorna (ok, nombre, latencia_ms)."""
     t0 = time.time()
+    backend, models = available_models()
+    if models:
+        return True, backend, (time.time() - t0) * 1000, models
     try:
         base = OLLAMA_URL.rsplit("/api/chat", 1)[0].rsplit("/api/", 1)[0]
         r = _req.get(f"{base}/api/tags", timeout=5)

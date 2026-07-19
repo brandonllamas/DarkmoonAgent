@@ -29,6 +29,9 @@ BASE_DIR  = Path(__file__).parent.parent.parent
 OUT_DIR   = BASE_DIR / "out_re"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+from skills.llm_client import chat_text, available_models
 
 # ── Nombres de directorio ─────────────────────────────────────────────────────
 def sanitize_name(name: str) -> str:
@@ -1357,6 +1360,9 @@ def detect_target(path: str) -> dict:
 
 # ── Ollama ────────────────────────────────────────────────────────────────────
 def check_ollama():
+    backend, models = available_models()
+    if models:
+        return True, models
     base = OLLAMA_URL.rsplit("/api/chat",1)[0].rsplit("/api/",1)[0]
     try:
         r = requests.get(f"{base}/api/tags", timeout=5)
@@ -1376,11 +1382,7 @@ def get_model(preferred=None):
     return models[0], models
 
 def call_ollama(model: str, messages: list) -> dict:
-    payload = {"model": model, "messages": messages, "stream": False, "format": "json",
-               "options": {"temperature": 0.1, "num_ctx": 8192}}
-    r = requests.post(OLLAMA_URL, json=payload, timeout=300)
-    r.raise_for_status()
-    content = r.json()["message"]["content"]
+    content = chat_text(messages, model, temperature=.1, max_tokens=8192, timeout=300, json_mode=True)
     try: return json.loads(content)
     except json.JSONDecodeError:
         s, e = content.find("{"), content.rfind("}")+1
@@ -1391,11 +1393,8 @@ def call_ollama(model: str, messages: list) -> dict:
                 "task_complete":True,"risk_level":"low","phase":"identify","install_needed":[]}
 
 def call_ollama_text(model: str, prompt: str) -> str:
-    payload = {"model":model,"messages":[{"role":"user","content":prompt}],
-               "stream":False,"options":{"temperature":0.3,"num_ctx":16384}}
-    r = requests.post(OLLAMA_URL, json=payload, timeout=600)
-    r.raise_for_status()
-    return r.json()["message"]["content"]
+    return chat_text([{"role":"user","content":prompt}], model, temperature=.3,
+                     max_tokens=16384, timeout=600)
 
 # ── Ejecución de comandos ─────────────────────────────────────────────────────
 def run_cmd(cmd: str, cwd=None, timeout: int = 300):
