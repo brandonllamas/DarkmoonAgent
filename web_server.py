@@ -26,6 +26,7 @@ import threading
 import time
 import uuid
 import mimetypes
+from urllib.parse import quote
 from datetime import datetime
 from pathlib import Path
 
@@ -67,6 +68,7 @@ def _exploit_workflow_context(user_message: str) -> str:
 # Events that should be persisted so they can be replayed when reloading a session
 _PERSIST_EVENT_TYPES = {
     "thinking", "message",
+    "llm_stream_end",
     "command_start", "command_done",
     "skill_start", "skill_done",
     "fetch_start", "fetch_done",
@@ -99,7 +101,7 @@ class EventStreamer:
     def put(self, event):
         with self.cond:
             self.history.append(event)
-            if event.get("type") == "done" or event.get("type") == "error":
+            if event.get("type") == "done" or (event.get("type") == "error" and event.get("fatal")):
                 self.is_done = True
             self.cond.notify_all()
         # Persist tool events to disk for session history replay
@@ -123,7 +125,7 @@ class EventStreamer:
             if event:
                 idle_ticks = 0
                 yield event
-                if event.get("type") == "done" or event.get("type") == "error":
+                if event.get("type") == "done" or (event.get("type") == "error" and event.get("fatal")):
                     break
             else:
                 if not thread.is_alive():
@@ -167,7 +169,7 @@ from agent import (
     OLLAMA_URL, LMSTUDIO_URL, DEEPSEEK_API_URL, DEEPSEEK_API_KEY,
     OUT_DIR, BASE_DIR,
     LLM_BACKEND,
-    call_llm, call_ollama,
+    call_llm, call_llm_stream, call_ollama,
     check_backend, check_ollama, check_lmstudio, check_deepseek,
     _backend_display_name, _backend_url,
     parse_skill_call,
@@ -215,9 +217,17 @@ def _classify_turn_output(ps, all_output: list[dict], emit) -> list[dict]:
     if not all_output or "vuln_classifier" not in skill_names():
         return []
 
+    labels = {item.get("skill") or item.get("command") or "respuesta" for item in all_output}
+    if "web_asset_mirror" in labels and labels <= {"web_asset_mirror", "assistant_response"}:
+        return []
+
     parts = []
     for item in all_output:
         label = item.get("skill") or item.get("command") or "respuesta"
+        if label == "web_asset_mirror":
+            # Es inventario/análisis de artefactos, no un hallazgo que requiera
+            # una segunda llamada de clasificación TP/FP.
+            continue
         raw = item.get("output") or item.get("stdout") or ""
         stderr = item.get("stderr") or ""
         structured = item.get("findings") or []
@@ -362,6 +372,14 @@ def _process_chat_turn(
         database.create_session(session_name, project_dir.name, saved_model or model)
 
         actual_model = saved_model or model
+        # Una sesión puede haberse creado con Ollama y reanudarse ahora con
+        # --deepseek. No enviar nombres locales (p. ej. deepseek-r1:14b) a la API.
+        try:
+            backend_ok, backend_models = check_backend()
+            if backend_ok and backend_models and actual_model not in backend_models:
+                actual_model = model if model in backend_models else backend_models[0]
+        except Exception:
+            pass
         # If model is unknown, try to get a real one
         if actual_model == "unknown" or not actual_model:
             try:
@@ -649,6 +667,47 @@ def _process_chat_turn(
         except Exception:
             pass  # Auto-optimización no crítica
 
+        def _call_agent_model() -> dict:
+            """DeepSeek en streaming con lotes pequeños; fallback compatible para local."""
+            import agent as _ag
+            if _ag.LLM_BACKEND != "deepseek":
+                return call_llm(actual_model, conversation)
+
+            emit({"type": "llm_stream_start", "model": actual_model,
+                  "backend": "deepseek"})
+            pending = {"kind": "", "text": "", "last": time.monotonic()}
+
+            def _flush(force: bool = False):
+                if not pending["text"]:
+                    return
+                if not force and len(pending["text"]) < 96 and time.monotonic() - pending["last"] < .06:
+                    return
+                emit({"type": "llm_delta", "channel": pending["kind"],
+                      "content": pending["text"]})
+                pending["text"] = ""
+                pending["last"] = time.monotonic()
+
+            def _on_delta(kind: str, text: str):
+                if pending["kind"] and pending["kind"] != kind:
+                    _flush(True)
+                pending["kind"] = kind
+                pending["text"] += text
+                _flush(False)
+
+            try:
+                result = call_llm_stream(actual_model, conversation, on_delta=_on_delta)
+                _flush(True)
+                raw = result.pop("_stream_raw", "")
+                reasoning = result.pop("_reasoning_content", "")
+                usage = result.pop("_usage", {})
+                emit({"type": "llm_stream_end", "model": actual_model,
+                      "raw": raw[:100000], "reasoning": reasoning[:100000],
+                      "usage": usage})
+                return result
+            except Exception:
+                _flush(True)
+                raise
+
         for iteration in range(max_iters):
             # Summarize context if too large
             conversation = summarize_if_needed(actual_model, conversation)
@@ -671,10 +730,10 @@ def _process_chat_turn(
                     _nudge = "Continúa. Emite los comandos SKILL necesarios o marca task_complete:true."
                 conversation.append({"role": "user", "content": _nudge})
 
-            # Call Ollama
+            # Call the active backend (DeepSeek streams every token to the UI).
             emit({"type": "status", "content": f"Consultando {actual_model}…"})
             try:
-                resp = call_llm(actual_model, conversation)
+                resp = _call_agent_model()
             except Exception as e:
                 err_str = str(e)
                 if "400" in err_str or "context" in err_str.lower():
@@ -683,7 +742,7 @@ def _process_chat_turn(
                     conversation = _ht(conversation, target_chars=5000)
                     emit({"type": "status", "content": "Contexto reducido, reintentando…"})
                     try:
-                        resp = call_llm(actual_model, conversation)
+                        resp = _call_agent_model()
                     except Exception as e2:
                         emit({"type": "error", "content": f"Error {_backend_display_name()}: {e2}"})
                         break
@@ -810,6 +869,74 @@ def _process_chat_turn(
             }] if message else [])
             all_nuclei: list[dict] = []
 
+            # En modo DeepSeek rápido, los skills independientes de reconocimiento
+            # y análisis arrancan juntos. Los de explotación/desarrollo conservan
+            # ejecución secuencial para no mezclar estado ni artefactos.
+            _completed_skill_cmds: set[str] = set()
+            _parallel_skill_deny = {
+                "metasploit", "cred_stuff", "sqli_scan", "web_attack",
+                "apk_dynamic", "code_dev", "ducky_dev", "evasion_dev",
+                "ing_inversa", "vuln_classifier",
+            }
+
+            def _skill_args_for_project(name: str, args: dict) -> dict:
+                prepared = dict(args)
+                if name == "web_asset_mirror":
+                    prepared.setdefault("output_dir", str(project_dir / "web_assets"))
+                return prepared
+
+            fast_mode = os.environ.get("HACKERAGENT_FAST_MODE") == "1"
+            skill_jobs = []
+            if fast_mode:
+                for skill_cmd in sequential_cmds:
+                    skill_name, skill_args = parse_skill_call(skill_cmd)
+                    if (skill_name and skill_name not in _parallel_skill_deny
+                            and not _target_is_unavailable(skill_name, skill_args)):
+                        skill_jobs.append((skill_cmd, skill_name,
+                                           _skill_args_for_project(skill_name, skill_args)))
+
+            if len(skill_jobs) > 1:
+                import concurrent.futures
+                worker_count = max(2, min(int(os.environ.get("HACKERAGENT_WORKERS", "6")),
+                                          len(skill_jobs), 12))
+                emit({"type": "parallel_start", "count": len(skill_jobs),
+                      "workers": worker_count})
+                for _, skill_name, skill_args in skill_jobs:
+                    emit({"type": "skill_start", "skill": skill_name, "args": skill_args,
+                          "parallel": True})
+                with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    futures = {
+                        executor.submit(_run_skill, skill_name, **skill_args):
+                            (skill_cmd, skill_name, skill_args)
+                        for skill_cmd, skill_name, skill_args in skill_jobs
+                    }
+                    for future in concurrent.futures.as_completed(futures):
+                        skill_cmd, skill_name, skill_args = futures[future]
+                        try:
+                            sr = future.result()
+                            skill_out = sr.get("output", "")
+                            skill_ok = sr.get("success", False)
+                            skill_finds = sr.get("findings", [])
+                            emit({"type": "skill_done", "skill": skill_name,
+                                  "output": skill_out[:12000], "success": skill_ok,
+                                  "findings": skill_finds[:100],
+                                  "artifact_root": sr.get("artifact_root", ""),
+                                  "manifest_file": sr.get("manifest_file", ""),
+                                  "stats": sr.get("stats", {})})
+                            log.command(skill_cmd, skill_out, "", 0 if skill_ok else 1)
+                            ps.ingest_skill_findings(skill_name, skill_finds)
+                            if skill_finds:
+                                emit({"type": "new_findings", "findings": skill_finds[:50]})
+                            all_output.append({"skill": skill_name, "output": skill_out[:12000],
+                                               "success": skill_ok, "findings": skill_finds[:50]})
+                            _emit_file_ready(emit, sr, skill_name)
+                        except Exception as skill_exc:
+                            emit({"type": "error", "content": f"Skill {skill_name}: {skill_exc}"})
+                        _completed_skill_cmds.add(skill_cmd)
+                        executed_all.add(skill_cmd)
+                        breaker.record([skill_cmd])
+                emit({"type": "parallel_done", "count": len(skill_jobs)})
+
             # ── Execute parallel commands ──────────────────────────────────────
             if parallel_cmds:
                 import concurrent.futures
@@ -839,8 +966,11 @@ def _process_chat_turn(
 
             # ── Execute sequential commands ────────────────────────────────────
             for cmd in sequential_cmds:
+                if cmd in _completed_skill_cmds:
+                    continue
                 skill_name, skill_args = parse_skill_call(cmd)
                 if skill_name:
+                    skill_args = _skill_args_for_project(skill_name, skill_args)
                     if _target_is_unavailable(skill_name, skill_args):
                         blocked_target = skill_args.get("target", "")
                         emit({"type": "status", "content": f"Omitido {skill_name}: {blocked_target} está marcado como dominio abajo."})
@@ -858,8 +988,11 @@ def _process_chat_turn(
                         skill_ok   = sr.get("success", False)
                         skill_finds = sr.get("findings", [])
                         emit({"type": "skill_done", "skill": skill_name,
-                              "output": skill_out[:5000], "success": skill_ok,
-                              "findings": skill_finds[:50]})
+                              "output": skill_out[:12000], "success": skill_ok,
+                              "findings": skill_finds[:100],
+                              "artifact_root": sr.get("artifact_root", ""),
+                              "manifest_file": sr.get("manifest_file", ""),
+                              "stats": sr.get("stats", {})})
                         log.command(cmd, skill_out, "", 0 if skill_ok else 1)
                         new_domains = ps.ingest_skill_findings(skill_name, skill_finds)
                         if skill_finds:
@@ -1023,7 +1156,7 @@ def _process_chat_turn(
         emit({"type": "done", "session": session_name})
 
     except Exception as exc:
-        emit({"type": "error", "content": str(exc)})
+        emit({"type": "error", "content": str(exc), "fatal": True})
         # Try to save whatever conversation we have so far
         try:
             save_session(session_name, conversation, actual_model, project_dir)
@@ -1042,6 +1175,9 @@ _EXT_LANG = {
 def _emit_file_ready(emit_fn, skill_result: dict, skill_name: str):
     """Emit a file_ready event when a skill produces a downloadable file."""
     from pathlib import Path
+    if skill_name == "web_asset_mirror":
+        # El manifiesto puede ser grande y ya se sirve desde Asset Explorer.
+        return
     # Gather candidate file paths from skill result keys
     candidates = []
     for key in ("code_file", "saved", "script_path", "report_file"):
@@ -1098,6 +1234,135 @@ def api_download():
     if not fp.exists() or not fp.is_file():
         abort(404)
     return send_file(str(fp.resolve()), as_attachment=True, download_name=fp.name)
+
+
+def _asset_capture_dir(proj_id: str, capture: str = "") -> tuple[Path, Path]:
+    """Resuelve web_assets/capture sin permitir escapes ni symlinks externos."""
+    out_root = OUT_DIR.resolve()
+    project_dir = (OUT_DIR / proj_id).resolve()
+    try:
+        project_dir.relative_to(out_root)
+    except ValueError:
+        abort(403)
+    if not project_dir.is_dir():
+        abort(404)
+    base = (project_dir / "web_assets").resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    if not capture:
+        return base, base
+    candidate = (base / capture).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError:
+        abort(403)
+    if not candidate.is_dir():
+        abort(404)
+    return base, candidate
+
+
+def _asset_file(proj_id: str, capture: str, relative_path: str) -> tuple[Path, Path]:
+    _, capture_dir = _asset_capture_dir(proj_id, capture)
+    candidate = (capture_dir / relative_path).resolve()
+    try:
+        candidate.relative_to(capture_dir)
+    except ValueError:
+        abort(403)
+    if not candidate.is_file():
+        abort(404)
+    return capture_dir, candidate
+
+
+@app.route("/api/projects/<proj_id>/assets", methods=["GET"])
+def api_asset_captures(proj_id: str):
+    base, _ = _asset_capture_dir(proj_id)
+    captures = []
+    for folder in sorted((p for p in base.iterdir() if p.is_dir()),
+                         key=lambda p: p.stat().st_mtime, reverse=True):
+        manifest = {}
+        manifest_file = folder / "manifest.json"
+        if manifest_file.is_file():
+            try:
+                manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+            except Exception:
+                manifest = {}
+        stats = manifest.get("stats", {})
+        captures.append({
+            "id": folder.name, "name": folder.name,
+            "target": manifest.get("target", ""),
+            "created_at": manifest.get("created_at") or datetime.fromtimestamp(folder.stat().st_mtime).isoformat(),
+            "stats": stats,
+        })
+    return jsonify({"captures": captures})
+
+
+@app.route("/api/projects/<proj_id>/assets/tree", methods=["GET"])
+def api_asset_tree(proj_id: str):
+    capture = request.args.get("capture", "").strip()
+    if not capture:
+        return jsonify({"error": "capture required"}), 400
+    _, root = _asset_capture_dir(proj_id, capture)
+    files = []
+    for file in root.rglob("*"):
+        if not file.is_file() or file.is_symlink():
+            continue
+        try:
+            relative = file.relative_to(root).as_posix()
+            mime = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
+            size = file.stat().st_size
+        except OSError:
+            continue
+        is_text = (mime.startswith("text/") or mime in {
+            "application/json", "application/javascript", "application/xml",
+            "image/svg+xml", "application/manifest+json",
+        } or file.suffix.lower() in {".js", ".mjs", ".cjs", ".css", ".map", ".md"})
+        files.append({"path": relative, "name": file.name, "size": size,
+                      "mime": mime, "is_text": is_text,
+                      "is_image": mime.startswith("image/") and mime != "image/svg+xml"})
+    files.sort(key=lambda item: (item["path"].count("/"), item["path"].lower()))
+    return jsonify({"capture": capture, "files": files, "count": len(files)})
+
+
+@app.route("/api/projects/<proj_id>/assets/file", methods=["GET"])
+def api_asset_preview(proj_id: str):
+    capture = request.args.get("capture", "").strip()
+    relative = request.args.get("path", "").strip()
+    if not capture or not relative:
+        return jsonify({"error": "capture and path required"}), 400
+    _, file = _asset_file(proj_id, capture, relative)
+    mime = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
+    raw_url = (f"/api/projects/{quote(proj_id, safe='')}/assets/raw?"
+               f"capture={quote(capture, safe='')}&path={quote(relative, safe='')}")
+    if mime.startswith("image/") and mime != "image/svg+xml":
+        return jsonify({"kind": "image", "mime": mime, "size": file.stat().st_size,
+                        "raw_url": raw_url, "path": relative})
+    is_text = (mime.startswith("text/") or mime in {
+        "application/json", "application/javascript", "application/xml", "image/svg+xml",
+    } or file.suffix.lower() in {".js", ".mjs", ".cjs", ".css", ".map", ".md"})
+    if is_text:
+        content = file.read_text(encoding="utf-8", errors="replace")
+        truncated = len(content) > 500000
+        return jsonify({"kind": "text", "mime": mime, "size": file.stat().st_size,
+                        "content": content[:500000], "truncated": truncated,
+                        "raw_url": raw_url, "path": relative})
+    return jsonify({"kind": "binary", "mime": mime, "size": file.stat().st_size,
+                    "raw_url": raw_url, "path": relative})
+
+
+@app.route("/api/projects/<proj_id>/assets/raw", methods=["GET"])
+def api_asset_raw(proj_id: str):
+    capture = request.args.get("capture", "").strip()
+    relative = request.args.get("path", "").strip()
+    if not capture or not relative:
+        abort(400)
+    _, file = _asset_file(proj_id, capture, relative)
+    mime = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
+    inline_safe = mime.startswith("image/") and mime != "image/svg+xml"
+    response = send_file(str(file),
+                         as_attachment=request.args.get("download") == "1" or not inline_safe,
+                         download_name=file.name)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = "sandbox"
+    return response
 
 
 @app.route("/api/projects", methods=["GET"])
@@ -1381,18 +1646,22 @@ def api_chat(proj_id: str, sess_name: str):
                         uploaded_file_paths=file_paths,
                     )
                 except Exception as e:
-                    streamer.put({"type": "error", "content": str(e)})
+                    streamer.put({"type": "error", "content": str(e), "fatal": True})
 
             t = threading.Thread(target=_bg, daemon=True)
             _ACTIVE_SESSIONS[session_key] = {"streamer": streamer, "thread": t}
             t.start()
 
         def generate():
-            for event in streamer.get_iterator(t):
-                if event is None:
-                    yield ": keepalive\n\n"
-                else:
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            try:
+                for event in streamer.get_iterator(t):
+                    if event is None:
+                        yield ": keepalive\n\n"
+                    else:
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            finally:
+                if streamer.is_done and not t.is_alive():
+                    _ACTIVE_SESSIONS.pop(session_key, None)
 
         return Response(
             generate(),
@@ -1502,6 +1771,7 @@ def api_models():
         "available": True,
         "backend":   backend,
         "backend_name": _backend_display_name(),
+        "fast_mode": os.environ.get("HACKERAGENT_FAST_MODE") == "1",
         "models":    [{"name": m, "stars": score_model(m)[0], "desc": score_model(m)[1]}
                       for m in ranked],
     })
@@ -1554,6 +1824,11 @@ def api_switch_backend():
     if new_backend not in ("ollama", "lmstudio", "deepseek"):
         return jsonify({"error": "backend must be 'ollama', 'lmstudio' or 'deepseek'"}), 400
     _ag.LLM_BACKEND = new_backend
+    os.environ["HACKERAGENT_LLM_BACKEND"] = new_backend
+    if new_backend == "deepseek":
+        os.environ["HACKERAGENT_FAST_MODE"] = "1"
+    else:
+        os.environ.pop("HACKERAGENT_FAST_MODE", None)
     # Return the models for the new backend
     ok, models = check_backend()
     ranked = sorted(models, key=lambda m: score_model(m)[0], reverse=True) if ok else []
@@ -1694,6 +1969,10 @@ def launch(host: str = "0.0.0.0", port: int = 7860, debug: bool = False, verbose
             _ag.LLM_BACKEND = "ollama"
         elif deepseek_ok:
             _ag.LLM_BACKEND = "deepseek"
+
+    os.environ["HACKERAGENT_LLM_BACKEND"] = _ag.LLM_BACKEND
+    if _ag.LLM_BACKEND == "deepseek":
+        os.environ["HACKERAGENT_FAST_MODE"] = "1"
 
     backend_name = _backend_display_name()
     ok, models = check_backend()

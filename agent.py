@@ -7,6 +7,7 @@ Mejoras v2: resumen incremental, timeouts por herramienta, circuit breaker,
 
 import subprocess
 import requests
+from requests.adapters import HTTPAdapter
 import json
 import re
 import argparse
@@ -79,6 +80,13 @@ DEEPSEEK_MODEL   = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")  # deepseek
 LLM_BACKEND      = "ollama"   # "ollama", "lmstudio" o "deepseek" — se setea en main()
 VERBOSE          = False
 OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Reutilizar conexiones reduce de forma visible la latencia de los ciclos
+# multi-turno y de los SubAgents, especialmente con la API remota de DeepSeek.
+_HTTP = requests.Session()
+_HTTP.mount("http://", HTTPAdapter(pool_connections=16, pool_maxsize=32))
+_HTTP.mount("https://", HTTPAdapter(pool_connections=16, pool_maxsize=32))
+_DEEPSEEK_CHECK_CACHE = {"ts": 0.0, "value": None}
 
 
 def sanitize_target(target: str) -> str:
@@ -1179,18 +1187,29 @@ def check_deepseek():
     """Verifica que la API key de DeepSeek esté configurada y la API responda."""
     if not DEEPSEEK_API_KEY:
         return False, []
+    cached = _DEEPSEEK_CHECK_CACHE.get("value")
+    if cached is not None and time.time() - float(_DEEPSEEK_CHECK_CACHE["ts"]) < 20:
+        return cached
     try:
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}"}
-        r = requests.get(f"{DEEPSEEK_API_URL}/models", headers=headers, timeout=10)
+        r = _HTTP.get(f"{DEEPSEEK_API_URL}/models", headers=headers, timeout=(5, 10))
         if r.status_code == 200:
             data = r.json().get("data", [])
             models = [m["id"] for m in data if m.get("id")]
-            return True, models if models else [DEEPSEEK_MODEL]
+            result = (True, models if models else [DEEPSEEK_MODEL])
+            _DEEPSEEK_CHECK_CACHE.update(ts=time.time(), value=result)
+            return result
+        if r.status_code in (401, 403):
+            result = (False, [])
+            _DEEPSEEK_CHECK_CACHE.update(ts=time.time(), value=result)
+            return result
         # Algunas versiones de la API no exponen /models pero sí aceptan chat
-        return True, [DEEPSEEK_MODEL]
+        result = (True, [DEEPSEEK_MODEL])
     except Exception:
         # Si hay API key, asumimos que funciona (validación real al hacer la primera llamada)
-        return bool(DEEPSEEK_API_KEY), [DEEPSEEK_MODEL] if DEEPSEEK_API_KEY else []
+        result = (bool(DEEPSEEK_API_KEY), [DEEPSEEK_MODEL] if DEEPSEEK_API_KEY else [])
+    _DEEPSEEK_CHECK_CACHE.update(ts=time.time(), value=result)
+    return result
 
 
 def get_model_deepseek(preferred=None):
@@ -1209,7 +1228,10 @@ def get_model_deepseek(preferred=None):
         match = [m for m in models if preferred.lower() in m.lower()]
         if match:
             return match[0], models
-        print(f"{YELLOW}⚠ Modelo '{preferred}' no encontrado en DeepSeek. Usando {models[0]}{R}")
+        fallback_model = DEEPSEEK_MODEL if DEEPSEEK_MODEL in models else models[0]
+        print(f"{YELLOW}⚠ Modelo '{preferred}' no encontrado en DeepSeek. Usando {fallback_model}{R}")
+    if DEEPSEEK_MODEL in models:
+        return DEEPSEEK_MODEL, models
     return models[0], models
 
 
@@ -1220,53 +1242,136 @@ def _deepseek_headers() -> dict:
     }
 
 
-def call_deepseek(model: str, messages: list) -> dict:
-    """Llama a la API de DeepSeek (compatible OpenAI) y espera JSON."""
-    messages_copy = messages.copy()
-    messages_copy.append({"role": "system", "content": "You MUST respond ONLY with valid, raw JSON. Do not use markdown blocks like ```json. Your entire response must be parseable by JSON.parse()."})
+def _parse_llm_json(content: str) -> dict:
+    """Parsea la salida estructurada sin ocultar la respuesta cruda si falla."""
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        cleaned = content.strip()
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:]
+        elif cleaned.startswith("```"):
+            cleaned = cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        start, end = cleaned.find("{"), cleaned.rfind("}") + 1
+        if start != -1 and end > start:
+            try:
+                return json.loads(cleaned[start:end])
+            except Exception:
+                pass
+        return {
+            "thinking": "", "commands": [], "message": content,
+            "requires_confirmation": False, "task_complete": False,
+            "_json_parse_error": True, "risk_level": "low", "phase": "recon",
+            "needs_api_keys": [], "open_browser": "", "fetch_url": "",
+        }
 
+
+def _deepseek_payload(model: str, messages: list, *, stream: bool) -> dict:
+    """Construye el payload JSON nativo usado por todos los ciclos DeepSeek."""
+    messages_copy = [dict(message) for message in messages]
+    json_instruction = (
+        "\n\nYou MUST respond ONLY with one valid raw JSON object. "
+        "Do not use markdown fences and do not write text outside the JSON object."
+    )
+    if messages_copy and messages_copy[0].get("role") == "system":
+        messages_copy[0]["content"] = str(messages_copy[0].get("content", "")) + json_instruction
+    else:
+        messages_copy.insert(0, {"role": "system", "content": json_instruction.strip()})
+    max_tokens = int(os.environ.get("DEEPSEEK_MAX_TOKENS", "8192"))
     payload = {
-        "model": model,
+        "model": model or DEEPSEEK_MODEL,
         "messages": messages_copy,
         "temperature": 0.1,
-        "max_tokens": 4096,
-        "stream": False,
+        "max_tokens": max(1024, min(max_tokens, 16384)),
+        "stream": stream,
+        "response_format": {"type": "json_object"},
     }
-    r = requests.post(f"{DEEPSEEK_API_URL}/chat/completions",
-                      json=payload, headers=_deepseek_headers(), timeout=300)
+    if stream:
+        payload["stream_options"] = {"include_usage": True}
+    return payload
+
+
+def call_deepseek(model: str, messages: list) -> dict:
+    """Llama a la API de DeepSeek (compatible OpenAI) y espera JSON."""
+    payload = _deepseek_payload(model, messages, stream=False)
+    r = _HTTP.post(f"{DEEPSEEK_API_URL}/chat/completions",
+                   json=payload, headers=_deepseek_headers(), timeout=(15, 300))
     if not r.ok:
         try:
             err = r.json().get("error", {}).get("message", r.text[:300])
         except Exception:
             err = r.text[:300]
         raise Exception(f"DeepSeek API {r.status_code}: {err}")
-    content = r.json()["choices"][0]["message"]["content"]
-    finish_reason = r.json()["choices"][0].get("finish_reason", "")
+    body = r.json()
+    content = body["choices"][0]["message"]["content"]
+    finish_reason = body["choices"][0].get("finish_reason", "")
 
     if finish_reason == "length":
         raise Exception("400: DeepSeek reached context limit (finish_reason: length). Needs truncation.")
 
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError:
-        # Fallback: quitar markdown tags si los generó
-        cl = content.strip()
-        if cl.startswith("```json"): cl = cl[7:]
-        elif cl.startswith("```"): cl = cl[3:]
-        if cl.endswith("```"): cl = cl[:-3]
+    result = _parse_llm_json(content)
+    result["_usage"] = body.get("usage", {})
+    return result
 
-        s, e = cl.find("{"), cl.rfind("}") + 1
-        if s != -1 and e > s:
+
+def call_deepseek_stream(model: str, messages: list, on_delta=None) -> dict:
+    """Transmite reasoning/content y devuelve el JSON final del ciclo."""
+    payload = _deepseek_payload(model, messages, stream=True)
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    usage: dict = {}
+    finish_reason = ""
+    with _HTTP.post(
+        f"{DEEPSEEK_API_URL}/chat/completions", json=payload,
+        headers=_deepseek_headers(), timeout=(15, 300), stream=True,
+    ) as response:
+        if not response.ok:
             try:
-                return json.loads(cl[s:e])
+                detail = response.json().get("error", {}).get("message", response.text[:300])
             except Exception:
-                pass
+                detail = response.text[:300]
+            raise Exception(f"DeepSeek API {response.status_code}: {detail}")
+        for raw_line in response.iter_lines(decode_unicode=True):
+            if isinstance(raw_line, bytes):
+                raw_line = raw_line.decode("utf-8", errors="replace")
+            if not raw_line or raw_line.startswith(":") or not raw_line.startswith("data:"):
+                continue
+            data = raw_line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            choice = choices[0]
+            finish_reason = choice.get("finish_reason") or finish_reason
+            delta = choice.get("delta") or {}
+            reasoning = delta.get("reasoning_content") or ""
+            content = delta.get("content") or ""
+            if reasoning:
+                reasoning_parts.append(reasoning)
+                if on_delta:
+                    on_delta("reasoning", reasoning)
+            if content:
+                content_parts.append(content)
+                if on_delta:
+                    on_delta("content", content)
 
-        return {"thinking": "", "commands": [], "message": content,
-                "requires_confirmation": False, "task_complete": False,
-                "_json_parse_error": True,
-                "risk_level": "low", "phase": "recon", "needs_api_keys": [],
-                "open_browser": "", "fetch_url": ""}
+    raw_content = "".join(content_parts)
+    if finish_reason == "length":
+        raise Exception("DeepSeek reached output limit (finish_reason: length).")
+    result = _parse_llm_json(raw_content)
+    result["_stream_raw"] = raw_content
+    result["_reasoning_content"] = "".join(reasoning_parts)
+    result["_usage"] = usage
+    return result
 
 
 def call_deepseek_text(model: str, prompt: str, timeout: int = 180) -> str:
@@ -1275,11 +1380,11 @@ def call_deepseek_text(model: str, prompt: str, timeout: int = 180) -> str:
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
-        "max_tokens": 4096,
+        "max_tokens": max(1024, min(int(os.environ.get("DEEPSEEK_MAX_TOKENS", "8192")), 16384)),
         "stream": False,
     }
-    r = requests.post(f"{DEEPSEEK_API_URL}/chat/completions",
-                      json=payload, headers=_deepseek_headers(), timeout=timeout)
+    r = _HTTP.post(f"{DEEPSEEK_API_URL}/chat/completions",
+                   json=payload, headers=_deepseek_headers(), timeout=(15, timeout))
     if not r.ok:
         try:
             err = r.json().get("error", {}).get("message", r.text[:300])
@@ -1328,6 +1433,13 @@ def call_llm(model: str, messages: list) -> dict:
     return res
 
 
+def call_llm_stream(model: str, messages: list, on_delta=None) -> dict:
+    """Versión interactiva: DeepSeek transmite; los backends locales mantienen compatibilidad."""
+    if LLM_BACKEND == "deepseek":
+        return call_deepseek_stream(model, messages, on_delta=on_delta)
+    return call_llm(model, messages)
+
+
 def call_llm_text(model: str, prompt: str, timeout: int = 180) -> str:
     """Llama al backend activo para texto libre (reportes, resúmenes)."""
     res = ""
@@ -1356,8 +1468,10 @@ def call_llm_raw(model: str, messages: list, json_mode: bool = False,
             "model": model, "messages": messages,
             "temperature": temperature, "max_tokens": ctx_size, "stream": False,
         }
-        r = requests.post(f"{DEEPSEEK_API_URL}/chat/completions",
-                          json=payload, headers=_deepseek_headers(), timeout=timeout)
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        r = _HTTP.post(f"{DEEPSEEK_API_URL}/chat/completions",
+                       json=payload, headers=_deepseek_headers(), timeout=(15, timeout))
         r.raise_for_status()
         res = r.json()["choices"][0]["message"]["content"]
     elif LLM_BACKEND == "lmstudio":
@@ -2189,7 +2303,7 @@ TASK_PROFILES = {
     "1": {
         "name":        "🌐 Pentesting web / Red Team",
         "desc":        "Reconocimiento, escaneo de vulnerabilidades, explotación web",
-        "categories":  ["recon_pasivo", "recon_activo", "vuln_scan"],
+        "categories":  ["recon_pasivo", "recon_activo", "vuln_scan", "analisis"],
         "target_hint": "Objetivo (URL, IP o dominio  — ej: https://example.com)",
         "agr_default": "3",
     },
@@ -3046,14 +3160,25 @@ def main():
                         choices=["ollama", "lmstudio", "deepseek"],
                         default=None,
                         help="Backend LLM: ollama, lmstudio o deepseek (si no se indica, se pregunta)")
-    parser.add_argument("--deepseek",      action="store_true",
-                        help="Atajo: usar DeepSeek API como backend (equivale a --backend deepseek)")
+    parser.add_argument("--deepseek", "--deepsek", action="store_true",
+                        help="Modo DeepSeek rápido (acepta también el alias --deepsek)")
     parser.add_argument("--verbose",       action="store_true",
                         help="Mostrar logs detallados y respuesta cruda del LLM")
     args = parser.parse_args()
 
-    global VERBOSE
+    global VERBOSE, LLM_BACKEND
     VERBOSE = args.verbose
+
+    # Debe aplicarse antes del dispatch web: de lo contrario `--web --deepseek`
+    # arrancaba Flask con el backend anterior. La variable de entorno hace que
+    # todos los skills que usan skills.llm_client hereden la misma elección.
+    if args.deepseek or args.backend == "deepseek":
+        LLM_BACKEND = "deepseek"
+        os.environ["HACKERAGENT_LLM_BACKEND"] = "deepseek"
+        os.environ["HACKERAGENT_FAST_MODE"] = "1"
+    elif args.backend:
+        LLM_BACKEND = args.backend
+        os.environ["HACKERAGENT_LLM_BACKEND"] = args.backend
 
     # ── Dispatch web mode ──────────────────────────────────────────────
     if args.web:
@@ -3107,7 +3232,6 @@ def main():
         print_disclaimer()
 
     # ── Selección de backend LLM ──────────────────────────────────────
-    global LLM_BACKEND
     if args.deepseek:
         LLM_BACKEND = "deepseek"
         print(f"  {GREEN}✓ Backend (CLI):{R} {CYAN}{BOLD}DeepSeek API{R}\n")
@@ -3116,6 +3240,12 @@ def main():
         print(f"  {GREEN}✓ Backend (CLI):{R} {CYAN}{BOLD}{_backend_display_name()}{R}\n")
     else:
         pick_backend()
+
+    os.environ["HACKERAGENT_LLM_BACKEND"] = LLM_BACKEND
+    if LLM_BACKEND == "deepseek":
+        os.environ["HACKERAGENT_FAST_MODE"] = "1"
+    else:
+        os.environ.pop("HACKERAGENT_FAST_MODE", None)
 
     model, all_models = get_model_auto(args.model)
 
@@ -3144,7 +3274,7 @@ def main():
             session_name = generate_session_name()
 
     if resumed and conversation is not None:
-        model      = saved_model or model
+        model      = (saved_model if saved_model in all_models else model) or model
         target_dir = project_dir
         turns      = len([m for m in conversation if m["role"] == "user"])
         print(f"{GREEN}✓ Sesión '{session_name}' reanudada ({turns} turnos) [{target_dir.name}]{R}")
@@ -3522,6 +3652,11 @@ def main():
                     print(f"  {RED}✗ {_be_names[new_be]} no está disponible.{R}")
                 else:
                     LLM_BACKEND = new_be
+                    os.environ["HACKERAGENT_LLM_BACKEND"] = new_be
+                    if new_be == "deepseek":
+                        os.environ["HACKERAGENT_FAST_MODE"] = "1"
+                    else:
+                        os.environ.pop("HACKERAGENT_FAST_MODE", None)
                     # Re-seleccionar el mejor modelo del nuevo backend
                     model, all_models = get_model_auto()
                     print(f"  {GREEN}✓ Backend:{R} {CYAN}{BOLD}{_backend_display_name()}{R}")
@@ -4059,18 +4194,52 @@ def main():
             _sa_target   = session_config.get("target", "")
             _pending_sa: list[tuple[str, SubAgent, dict]] = []  # (skill_name, agent, base_entry)
 
+            def _prepare_cli_skill(skill_cmd: str):
+                name, args = parse_skill_call(skill_cmd)
+                if name in ("code_dev",) and "output_dir" not in args:
+                    args["output_dir"] = str(target_dir)
+                if name == "web_asset_mirror" and "output_dir" not in args:
+                    args["output_dir"] = str(target_dir / "web_assets")
+                return name, args
+
+            _prefetched_skills: dict[str, dict] = {}
+            _fast_skill_deny = {
+                "metasploit", "cred_stuff", "sqli_scan", "web_attack",
+                "apk_dynamic", "code_dev", "ducky_dev", "evasion_dev",
+                "ing_inversa", "vuln_classifier",
+            }
+            _fast_jobs = []
+            if os.environ.get("HACKERAGENT_FAST_MODE") == "1":
+                for _cmd in skill_cmds:
+                    _name, _args = _prepare_cli_skill(_cmd)
+                    if _name and _name not in _fast_skill_deny:
+                        _fast_jobs.append((_cmd, _name, _args))
+            if len(_fast_jobs) > 1:
+                import concurrent.futures
+                _workers = max(2, min(int(os.environ.get("HACKERAGENT_WORKERS", "6")), len(_fast_jobs), 12))
+                print(f"  {MAGENTA}⚡ DeepSeek rápido: {len(_fast_jobs)} skills en paralelo ({_workers} workers){R}")
+                with concurrent.futures.ThreadPoolExecutor(max_workers=_workers) as _executor:
+                    _futures = {_executor.submit(run_skill, _name, **_args): _cmd
+                                for _cmd, _name, _args in _fast_jobs}
+                    for _future in concurrent.futures.as_completed(_futures):
+                        _cmd = _futures[_future]
+                        try:
+                            _prefetched_skills[_cmd] = _future.result()
+                        except Exception as _exc:
+                            _prefetched_skills[_cmd] = {
+                                "success": False, "output": f"Error: {_exc}", "findings": []}
+
             for skill_cmd in skill_cmds:
-                skill_name, skill_args = parse_skill_call(skill_cmd)
+                skill_name, skill_args = _prepare_cli_skill(skill_cmd)
                 if not skill_name:
                     continue
-                # Skills de desarrollo: entregar el resultado en la carpeta del proyecto
-                if skill_name in ("code_dev",) and "output_dir" not in skill_args:
-                    skill_args["output_dir"] = str(target_dir)
                 executed_this_turn.add(skill_cmd)
                 separator("─", CYAN, 50)
                 print(f"  {CYAN}🎯 SKILL:{R} {BOLD}{skill_name}{R}  {DIM}{skill_args}{R}")
                 separator("─", CYAN, 50)
-                s_result   = run_skill(skill_name, **skill_args)
+                s_result   = _prefetched_skills.get(skill_cmd)
+                if s_result is None:
+                    s_result = run_skill(skill_name, **skill_args)
                 s_out      = s_result.get("output", "")
                 s_ok       = s_result.get("success", False)
                 s_findings = s_result.get("findings", [])
@@ -4109,7 +4278,7 @@ def main():
                     "findings": s_findings[:50],
                 }
 
-                if _use_sa and s_out.strip():
+                if _use_sa and s_out.strip() and skill_name != "web_asset_mirror":
                     # Lanzar SubAgent en hilo paralelo — analiza output sin bloquear
                     print(f"  {MAGENTA}🤖 SubAgent[{skill_name}] lanzado (análisis en paralelo){R}")
                     sa = SubAgent(model, skill_name, s_out, target=_sa_target).start()

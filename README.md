@@ -12,14 +12,14 @@
   <img src="https://img.shields.io/badge/Ollama-local-000000?style=for-the-badge&logo=ollama&logoColor=white&labelColor=1a1a2e"/>
   <img src="https://img.shields.io/badge/Web_UI-Flask-000000?style=for-the-badge&logo=flask&logoColor=white&labelColor=1a1a2e"/>
   <img src="https://img.shields.io/badge/Kali_Linux-557C94?style=for-the-badge&logo=kalilinux&logoColor=white&labelColor=1a1a2e"/>
-  <img src="https://img.shields.io/badge/skills-42-F7768E?style=for-the-badge&labelColor=1a1a2e"/>
+  <img src="https://img.shields.io/badge/skills-45-F7768E?style=for-the-badge&labelColor=1a1a2e"/>
   <img src="https://img.shields.io/badge/multi--agente-SubAgents-BB9AF7?style=for-the-badge&labelColor=1a1a2e"/>
   <img src="https://img.shields.io/badge/license-MIT-9ECE6A?style=for-the-badge&labelColor=1a1a2e"/>
   <img src="https://img.shields.io/badge/auto--install-37+tools-3DBA6F?style=for-the-badge&labelColor=1a1a2e"/>
   <img src="https://img.shields.io/badge/auto--optimize-LLM-FF6B6B?style=for-the-badge&labelColor=1a1a2e"/>
 </p>
 
-### 🧠 42 skills · 🌐 Web UI dinámica · 🔬 RE + bypass · 🕸️ Fuzzing · 🔑 Credential Intel · 🛠️ Dev · ⚡ Auto-optimize
+### 🧠 45 skills · 🌐 Web UI dinámica · 🔬 RE + bypass · 🕸️ Fuzzing · 🔑 Credential Intel · 🛠️ Dev · ⚡ Auto-optimize
 
 </div>
 
@@ -37,7 +37,7 @@
 
 ## ✨ ¿Qué es HackerAgent?
 
-**HackerAgent** es un **agente autónomo de ciberseguridad** impulsado por IA local (Ollama/LM Studio). Orquesta **42 skills especializados** para realizar pentesting web, auditoría de Active Directory, ingeniería inversa, fuzzing inteligente, OSINT, desarrollo de herramientas ofensivas y más — **todo 100% local, sin enviar nada a la nube**.
+**HackerAgent** es un **agente autónomo de ciberseguridad** impulsado por Ollama, LM Studio o DeepSeek API. Orquesta **45 skills especializados** para realizar pentesting web, auditoría de Active Directory, ingeniería inversa, fuzzing inteligente, OSINT, desarrollo de herramientas y más. Con Ollama/LM Studio puede operar localmente; `--deepseek` activa el modo remoto rápido.
 
 Tú describes el objetivo en **lenguaje natural** (o desde la **Web UI**) y el agente:
 1. 🧠 **Detecta automáticamente** el tipo de tarea
@@ -100,6 +100,8 @@ cp .env.example .env 2>/dev/null || nano .env
 # 6) ¡Ejecutar!
 python3 agent.py                    # Modo terminal
 python3 agent.py --web              # Modo Web UI (http://127.0.0.1:7860)
+python3 agent.py --web --deepseek   # DeepSeek API + streaming + ejecución rápida
+# También se acepta el alias: --deepsek
 ```
 
 > ⚡ **Auto-instalación:** Al iniciar, HackerAgent verifica **37 herramientas** y las instala automáticamente si faltan (nmap, nuclei, ffuf, gobuster, subfinder, curl, etc.)
@@ -116,6 +118,12 @@ python3 agent.py --web              # Modo Web UI (http://127.0.0.1:7860)
 # ── Backend LLM ──────────────────────────────────────────
 OLLAMA_URL="http://192.168.80.120:11434/api/chat"
 # LMSTUDIO_URL="http://localhost:1234/v1"
+DEEPSEEK_API_KEY=""
+DEEPSEEK_API_URL="https://api.deepseek.com/v1"
+DEEPSEEK_MODEL="deepseek-chat"
+# Ajustes opcionales del modo rápido
+HACKERAGENT_WORKERS="6"
+DEEPSEEK_MAX_TOKENS="8192"
 
 # ── API keys (opcionales — los skills funcionan sin ellas) ──
 WPSCAN_API_KEY=""        # https://wpscan.com/api  (gratis, 25 req/día)
@@ -148,6 +156,7 @@ BROWSER="firefox"
 python3 agent.py --web                   # http://127.0.0.1:7860
 python3 agent.py --web --port 8080       # Puerto personalizado
 python3 agent.py --web --host 0.0.0.0    # Accesible desde la LAN
+python3 agent.py --web --deepseek         # DeepSeek FAST en toda la app
 ```
 
 <div align="center">
@@ -156,12 +165,14 @@ python3 agent.py --web --host 0.0.0.0    # Accesible desde la LAN
 |:--------|:------------|
 | ✨ **Diseño Animado** | Fondo con radial gradient ambient, glassmorphism, micro-animaciones |
 | 💬 **Chat interactivo** | Streaming SSE, thinking blocks colapsables, reveal secuencial |
+| 🧠 **DeepSeek Live** | Tokens, reasoning disponible, JSON completo y uso visibles en tiempo real |
+| ◫ **Asset Explorer** | Explora y previsualiza HTML, JS, CSS, imágenes, fonts y source maps descargados |
 | 📁 **Multi-proyecto** | CRUD completo: crear, editar ✏️, eliminar 🗑️ proyectos |
 | 🗨️ **Multi-sesión** | Múltiples chats por proyecto, renombrar, exportar 📥 |
 | 📊 **Dashboard** | Tarjetas de severidad, tabla de hallazgos, lista de subdominios |
 | 🔧 **Panel Tools** | Estado de 37 herramientas, instalación con un clic, barra de progreso |
 | ⚙️ **Config LLM** | Selector de backend (Ollama/LM Studio), modelos, skills toggle |
-| ⌨️ **Slash Menu** | Escribe `/` para 22+ comandos rápidos con autocomplete |
+| ⌨️ **Slash Menu** | Escribe `/` para 24+ comandos rápidos con autocomplete |
 | 📎 **Upload archivos** | Arrastra y suelta archivos que se inyectan en el contexto |
 | 🔄 **Auto-reconexión** | Reanuda streams SSE si se pierde la conexión |
 
@@ -171,7 +182,7 @@ python3 agent.py --web --host 0.0.0.0    # Accesible desde la LAN
 
 ---
 
-## 🧩 Skills — 42 Skills en 10 categorías
+## 🧩 Skills — 45 Skills en 10 categorías
 
 <details>
 <summary><b>🔍 RECONOCIMIENTO PASIVO (6 skills)</b></summary>
@@ -217,14 +228,23 @@ python3 agent.py --web --host 0.0.0.0    # Accesible desde la LAN
 </details>
 
 <details>
-<summary><b>🔬 ANÁLISIS DE CÓDIGO (3 skills)</b></summary>
+<summary><b>🔬 ANÁLISIS DE CÓDIGO (4 skills)</b></summary>
 <br/>
 
 | Skill | Descripción | Sintaxis |
 |:------|:------------|:---------|
 | `spider_code` | Spider HTML/JS: secretos, creds, source maps | `SKILL:spider_code target=https://x.com` |
 | `web_code` | Análisis profundo: framework, Firebase, endpoints | `SKILL:web_code target=https://x.com` |
+| `web_asset_mirror` | Clona assets completos, crea manifiesto explorable y analiza rutas/JS con IA | `SKILL:web_asset_mirror target=https://x.com depth=2` |
 | `vuln_classifier` | **Clasifica hallazgos como TP/FP** usando IA local | `SKILL:vuln_classifier input="SQLi en login.php"` |
+
+```text
+# 1. Captura el sitio y abre la pestaña Assets
+SKILL:web_asset_mirror target=https://example.com depth=2 max_pages=60 max_assets=800
+
+# 2. Analiza la última captura con el backend activo
+SKILL:web_asset_mirror action=analyze query="saca rutas, APIs, WebSockets y parámetros de los JS" ai=true
+```
 
 </details>
 
@@ -707,7 +727,7 @@ python3 agent.py --web                    # Web UI
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,2,5,20,30&height=150&section=footer&text=HackerAgent&fontSize=42&fontColor=ffffff&animation=twinkling" width="100%"/>
 
-<sub>🚀 **42 skills** · 🧠 IA local (Ollama) · 🌐 Web UI · 🔬 RE + bypass · 🕸️ Fuzzing · 🔑 Cred Intel</sub>
+<sub>🚀 **45 skills** · 🧠 Ollama / LM Studio / DeepSeek · 🌐 Web UI · 🔬 RE + bypass · 🕸️ Fuzzing · 🔑 Cred Intel</sub>
 <br/>
 <sub>⚡ Auto-install · 🤖 Auto-optimize · 🎯 TP/FP Classifier · 🏢 AD Audit · 🕵️ OSINT · 📱 Mobile</sub>
 <br/>

@@ -9,12 +9,17 @@ import os
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/chat")
 LMSTUDIO_URL = os.getenv("LMSTUDIO_URL", "http://localhost:1234/v1").rstrip("/")
 DEEPSEEK_API_URL = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1").rstrip("/")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+
+_HTTP = requests.Session()
+_HTTP.mount("http://", HTTPAdapter(pool_connections=12, pool_maxsize=24))
+_HTTP.mount("https://", HTTPAdapter(pool_connections=12, pool_maxsize=24))
 
 
 def _ollama_models() -> list[str]:
@@ -76,15 +81,16 @@ def chat_text(messages: list[dict[str, str]], model: str = "", *, temperature: f
                                         "temperature": temperature, "max_tokens": max_tokens, "stream": False}
             if json_mode:
                 payload["response_format"] = {"type": "json_object"}
-            response = requests.post(f"{DEEPSEEK_API_URL}/chat/completions", json=payload,
-                                     headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                                              "Content-Type": "application/json"}, timeout=timeout)
+            response = _HTTP.post(f"{DEEPSEEK_API_URL}/chat/completions", json=payload,
+                                  headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                                           "Content-Type": "application/json"},
+                                  timeout=(15, timeout))
             response.raise_for_status()
             return response.json()["choices"][0]["message"]["content"]
         if selected == "lmstudio":
             payload = {"model": model or "local", "messages": messages, "temperature": temperature,
                        "max_tokens": max_tokens, "stream": False}
-            response = requests.post(f"{LMSTUDIO_URL}/chat/completions", json=payload, timeout=timeout)
+            response = _HTTP.post(f"{LMSTUDIO_URL}/chat/completions", json=payload, timeout=timeout)
             response.raise_for_status()
             return response.json()["choices"][0]["message"]["content"]
         models = _ollama_models()
@@ -95,7 +101,7 @@ def chat_text(messages: list[dict[str, str]], model: str = "", *, temperature: f
                    "options": {"temperature": temperature, "num_ctx": max_tokens}}
         if json_mode:
             payload["format"] = "json"
-        response = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
+        response = _HTTP.post(OLLAMA_URL, json=payload, timeout=timeout)
         response.raise_for_status()
         return response.json()["message"]["content"]
     except requests.RequestException as exc:
