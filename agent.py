@@ -1887,16 +1887,27 @@ def parse_skill_call(cmd: str):
     """
     if not cmd.strip().upper().startswith("SKILL:"):
         return None, {}
+    import shlex
     rest  = cmd.strip()[6:]  # skip "SKILL:"
-    parts = rest.split()
+    try:
+        parts = shlex.split(rest)
+    except ValueError:
+        # Keep the command usable while returning a helpful skill error later.
+        parts = rest.split()
     if not parts:
         return None, {}
     skill_name = parts[0].lower()
     args: dict = {}
+    positional_targets = []
     for p in parts[1:]:
         if "=" in p:
             k, _, v = p.partition("=")
             args[k.strip()] = v.strip()
+        elif p.startswith(("http://", "https://")):
+            positional_targets.append(p)
+    # Accept a URL after an empty target argument as the actual target.
+    if positional_targets and not args.get("target"):
+        args["target"] = positional_targets[-1]
     return skill_name, args
 
 

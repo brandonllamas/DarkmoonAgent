@@ -422,6 +422,46 @@ def _process_chat_turn(
         cache = ScanCache(project_dir)
         ps    = ProjectState(project_dir)
 
+        # Explicit skills execute alone: do not let the model expand them into
+        # a different scan such as Nuclei.
+        explicit_skill, explicit_args = parse_skill_call(user_message)
+        if explicit_skill:
+            if explicit_skill == "web_asset_mirror":
+                explicit_args.setdefault("output_dir", str(project_dir / "web_assets"))
+            emit({"type": "skill_start", "skill": explicit_skill, "args": explicit_args})
+            try:
+                result = _run_skill(explicit_skill, **explicit_args)
+                output = result.get("output", "")
+                findings = result.get("findings", [])
+                success = result.get("success", False)
+                emit({
+                    "type": "skill_done", "skill": explicit_skill, "output": output[:12000],
+                    "success": success, "findings": findings[:100],
+                    "artifact_root": result.get("artifact_root", ""),
+                    "manifest_file": result.get("manifest_file", ""),
+                    "analysis_file": result.get("analysis_file", ""),
+                    "stats": result.get("stats", {}),
+                })
+                log.command(user_message, output, "", 0 if success else 1)
+                ps.ingest_skill_findings(explicit_skill, findings)
+                if findings:
+                    emit({"type": "new_findings", "findings": findings[:50]})
+                _emit_file_ready(emit, result, explicit_skill)
+                reply = (
+                    f"SKILL:{explicit_skill} completado." if success
+                    else f"SKILL:{explicit_skill} terminó con errores; revisa la salida."
+                )
+                conversation.append({"role": "assistant", "content": json.dumps({
+                    "message": reply, "phase": "recon", "risk_level": "info",
+                }, ensure_ascii=False)})
+                emit({"type": "message", "content": reply, "phase": "recon", "risk": "info"})
+            except Exception as exc:
+                emit({"type": "error", "content": f"Skill {explicit_skill}: {exc}"})
+            ps.save()
+            save_session(session_name, conversation, actual_model, project_dir)
+            emit({"type": "done", "session": session_name})
+            return
+
         # Verify previously discovered domains without waiting for an LLM.
         if _DOMAIN_AVAILABILITY_TRIGGER.search(user_message):
             from urllib.parse import urlparse
@@ -1286,11 +1326,21 @@ def api_asset_captures(proj_id: str):
             except Exception:
                 manifest = {}
         stats = manifest.get("stats", {})
+        analysis = {}
+        analysis_file = folder / "analysis.json"
+        if analysis_file.is_file():
+            try:
+                analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
+            except Exception:
+                analysis = {}
         captures.append({
             "id": folder.name, "name": folder.name,
             "target": manifest.get("target", ""),
             "created_at": manifest.get("created_at") or datetime.fromtimestamp(folder.stat().st_mtime).isoformat(),
             "stats": stats,
+            "analyzed": bool(analysis),
+            "analysis_stats": analysis.get("stats", {}),
+            "verifier": analysis.get("verifier", {}),
         })
     return jsonify({"captures": captures})
 
@@ -1320,6 +1370,54 @@ def api_asset_tree(proj_id: str):
                       "is_image": mime.startswith("image/") and mime != "image/svg+xml"})
     files.sort(key=lambda item: (item["path"].count("/"), item["path"].lower()))
     return jsonify({"capture": capture, "files": files, "count": len(files)})
+
+
+@app.route("/api/projects/<proj_id>/assets/analysis", methods=["GET"])
+def api_asset_analysis(proj_id: str):
+    capture = request.args.get("capture", "").strip()
+    if not capture:
+        return jsonify({"error": "capture required"}), 400
+    _, root = _asset_capture_dir(proj_id, capture)
+    analysis_file = root / "analysis.json"
+    if not analysis_file.is_file():
+        return jsonify({"capture": capture, "analysis": None})
+    try:
+        analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return jsonify({"error": f"analysis.json inválido: {exc}"}), 500
+    return jsonify({"capture": capture, "analysis": analysis})
+
+
+@app.route("/api/projects/<proj_id>/assets/analyze", methods=["POST"])
+def api_analyze_asset_capture(proj_id: str):
+    data = request.get_json(silent=True) or {}
+    capture = str(data.get("capture", "")).strip()
+    if not capture:
+        return jsonify({"error": "capture required"}), 400
+    base, _ = _asset_capture_dir(proj_id, capture)
+    try:
+        max_files = max(1, min(int(data.get("max_files", 500)), 5000))
+    except (TypeError, ValueError):
+        max_files = 500
+    verify_ai = str(data.get("verify_ai", "true")).strip().lower() not in {"0", "false", "no", "off"}
+    result = _run_skill(
+        "web_asset_mirror", action="analyze", capture=capture,
+        output_dir=str(base), ai="true" if verify_ai else "false", max_files=str(max_files),
+        model=str(data.get("model", "")).strip(),
+        query="inventario completo de rutas, APIs, servidores, parámetros, Firebase, GraphQL y WebSockets",
+    )
+    if not result.get("success"):
+        return jsonify({"error": result.get("output", "No se pudo analizar la captura")}), 500
+    analysis = result.get("analysis")
+    if not analysis:
+        analysis_file = Path(result.get("analysis_file", ""))
+        if analysis_file.is_file():
+            analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
+    return jsonify({
+        "capture": capture, "analysis": analysis or {},
+        "stats": result.get("stats", {}), "verifier": (analysis or {}).get("verifier", {}),
+        "output": result.get("output", "")[:4000],
+    })
 
 
 @app.route("/api/projects/<proj_id>/assets/file", methods=["GET"])

@@ -36,6 +36,24 @@ class AssetApiTest(unittest.TestCase):
                 self.assertEqual(preview.status_code, 200)
                 self.assertIn("/api/test", preview.get_json()["content"])
 
+                analyzed = client.post(
+                    "/api/projects/project/assets/analyze",
+                    json={"capture": "capture_one", "max_files": 100, "verify_ai": False},
+                )
+                self.assertEqual(analyzed.status_code, 200, analyzed.get_data(as_text=True))
+                analysis = analyzed.get_json()["analysis"]
+                self.assertEqual(analysis["version"], 4)
+                self.assertEqual(analysis["stats"]["api"], 1)
+                self.assertEqual(analysis["stats"]["consumers"], 1)
+                self.assertEqual(analysis["items"][0]["value"], "/api/test")
+                self.assertEqual(analysis["items"][0]["declarations"][0]["kind"], "inline_literal")
+                self.assertEqual(analysis["items"][0]["consumers"][0]["callee"], "fetch")
+
+                fetched_analysis = client.get(
+                    "/api/projects/project/assets/analysis?capture=capture_one")
+                self.assertEqual(fetched_analysis.status_code, 200)
+                self.assertEqual(fetched_analysis.get_json()["analysis"]["stats"]["api"], 1)
+
                 escaped = client.get("/api/projects/project/assets/tree?capture=..")
                 self.assertEqual(escaped.status_code, 403)
         finally:
