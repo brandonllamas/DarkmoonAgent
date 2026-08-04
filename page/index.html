@@ -2522,7 +2522,8 @@ async function loadHistory(projId,sessName){
         try{
           const p=JSON.parse(msg.content);
           if(p.thinking?.trim())appendThinking(p.thinking,false);
-          if(p.message?.trim())appendAgentMsg(p.message,p.phase||'recon',p.risk_level||'low',false);
+          const assistantText=String(p.message||p.error||'').trim();
+          if(assistantText)appendAgentMsg(assistantText,p.phase||'recon',p.risk_level||'low',false);
         }catch{if(msg.content?.trim())appendAgentMsg(msg.content,'recon','low',false);}
       }
     }

@@ -2812,21 +2812,52 @@ def _resolve_re_target(text: str, cwd: str) -> str:
     Extrae del texto la ruta a bypassear. Si no hay ninguna, usa el cwd
     (el skill ing_inversa autodescubre el archivo objetivo dentro de la carpeta).
     """
+    def _is_filesystem_root(candidate: str) -> bool:
+        """Evita que un '/' suelto gane a una ruta real posterior."""
+        try:
+            resolved = Path(candidate).resolve()
+            return resolved.parent == resolved
+        except (OSError, RuntimeError):
+            return False
+
+    def _is_explicit_absolute(candidate: str) -> bool:
+        """Reconoce rutas POSIX y Windows aunque el servidor use el otro SO."""
+        return bool(
+            os.path.isabs(candidate)
+            or candidate.startswith("/")
+            or candidate.startswith("\\\\")
+            or re.match(r"^[A-Za-z]:[\\/]", candidate)
+        )
+
     # 1) ruta entre comillas (soporta espacios)
     m = re.search(r'["\']([^"\']+)["\']', text)
-    if m and Path(os.path.expanduser(m.group(1))).exists():
-        return os.path.expanduser(m.group(1))
+    if m:
+        quoted = os.path.expanduser(m.group(1))
+        if not _is_filesystem_root(quoted):
+            # Conservar una ruta absoluta inexistente permite que el skill
+            # reporte el target correcto en lugar de analizar cwd en silencio.
+            if Path(quoted).exists() or _is_explicit_absolute(quoted):
+                return quoted
+
     # 2) cualquier token separado por espacios que exista como archivo/carpeta
+    missing_absolute: list[str] = []
     for raw in text.split():
         tok = raw.strip('.,;:!?)("\'')
         if not tok or tok.lower() in ("bypass", "el", "login", "the", "de", "la", "al", "un"):
             continue
         cand = os.path.expanduser(tok)
-        if os.path.isabs(cand) and Path(cand).exists():
-            return cand
+        if _is_explicit_absolute(cand):
+            if _is_filesystem_root(cand):
+                continue
+            if Path(cand).exists():
+                return cand
+            missing_absolute.append(cand)
+            continue
         rel = Path(cwd) / tok
         if ("/" in tok or "\\" in tok or "." in tok) and rel.exists():
             return str(rel)
+    if missing_absolute:
+        return missing_absolute[0]
     # 3) sin ruta explícita → la carpeta actual (autodescubrimiento en el skill)
     return cwd
 

@@ -262,6 +262,31 @@ def _classify_turn_output(ps, all_output: list[dict], emit) -> list[dict]:
     return classified
 
 
+def _model_response_message(resp: dict) -> tuple[str, bool]:
+    """Extrae el texto visible y detecta errores terminales del modelo.
+
+    Algunos backends devuelven ``{"error": "...", "task_complete": false}``
+    fuera del esquema normal. Antes la Web UI ocultaba ese error y repetía la
+    misma consulta hasta agotar el bucle.
+    """
+    message = (
+        resp.get("message", "")
+        or resp.get("summary", "")
+        or resp.get("content", "")
+        or resp.get("response", "")
+    )
+    model_error = resp.get("error")
+    if not message and model_error:
+        if isinstance(model_error, str):
+            message = model_error
+        else:
+            try:
+                message = json.dumps(model_error, ensure_ascii=False)
+            except (TypeError, ValueError):
+                message = str(model_error)
+    return message, bool(model_error)
+
+
 def _read_project_meta(project_dir: Path) -> dict:
     p = database.get_project(project_dir.name)
     if p:
@@ -799,10 +824,8 @@ def _process_chat_turn(
             else:
                 _json_err_count = 0
 
-            thinking    = resp.get("thinking", "")
-            message     = resp.get("message", "")
-            if not message:
-                message = resp.get("summary", "") or resp.get("content", "") or resp.get("response", "")
+            thinking = resp.get("thinking", "")
+            message, response_has_error = _model_response_message(resp)
             
             raw_cmds = resp.get("commands")
             if raw_cmds is None:
@@ -811,10 +834,21 @@ def _process_chat_turn(
                 else:
                     raw_cmds = []
 
-            commands    = sanitize_commands(raw_cmds, current_target=ps.target)
+            commands = sanitize_commands(raw_cmds, current_target=ps.target)
+            terminal_model_error = response_has_error and not commands
             
             if not message and commands:
                 message = f"Ejecutando herramienta: `{commands[0]}`..."
+            elif terminal_model_error:
+                message = (
+                    f"{message}\n\n"
+                    "No se ejecutó ninguna herramienta y no se creó ningún artefacto."
+                )
+                # Normalizar antes de persistir para que el historial también
+                # muestre el error como respuesta del asistente.
+                resp = dict(resp)
+                resp["message"] = message
+                resp["task_complete"] = True
 
             # Sanitizar tipos de datos para prevenir crashes
             if isinstance(thinking, dict):
@@ -826,7 +860,7 @@ def _process_chat_turn(
                 message = message.get("content", str(message))
             elif not isinstance(message, str):
                 message = str(message) if message is not None else ""
-            task_done   = bool(resp.get("task_complete", False))
+            task_done   = bool(resp.get("task_complete", False)) or terminal_model_error
             risk        = resp.get("risk_level", "low")
             phase       = resp.get("phase", "recon")
             fetch_target = resp.get("fetch_url", "")
@@ -861,17 +895,18 @@ def _process_chat_turn(
             if not commands:
                 # Even a turn with no command can contain an assessment from
                 # the model (for example, analysis of an uploaded report).
-                _responses_to_classify = [{
-                    "skill": "assistant_response", "output": message, "findings": []
-                }]
-                if fetch_result_text:
-                    _responses_to_classify.append({
-                        "command": f"fetch {fetch_target}", "stdout": fetch_result_text,
-                        "stderr": "", "returncode": 0,
-                    })
-                _classify_turn_output(
-                    ps, _responses_to_classify, emit
-                )
+                if not terminal_model_error:
+                    _responses_to_classify = [{
+                        "skill": "assistant_response", "output": message, "findings": []
+                    }]
+                    if fetch_result_text:
+                        _responses_to_classify.append({
+                            "command": f"fetch {fetch_target}", "stdout": fetch_result_text,
+                            "stderr": "", "returncode": 0,
+                        })
+                    _classify_turn_output(
+                        ps, _responses_to_classify, emit
+                    )
                 ps.save()
                 conversation.append({"role": "assistant",
                                      "content": json.dumps(resp, ensure_ascii=False)})
