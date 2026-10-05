@@ -6,10 +6,13 @@
 HackerAgent/
 ├── agent.py                        # Agente principal de pentesting (CLI)
 ├── web_server.py                   # Servidor Flask para la Web UI (--web)
+├── lmstudio_client.py              # Cliente LM Studio compartido: auth, JSON Schema, SSE y diagnóstico
+├── llm_router.py                   # Ranking determinista multi-backend por tipo de tarea
+├── research_engine.py              # Búsqueda web multi-proveedor, extracción segura y contexto con citas
 ├── page/
 │   └── index.html                  # SPA: Web UI dinámica estilo Codex (violet theme, SSE)
 ├── confs.json                      # Rutas y comandos de herramientas externas
-├── .env                            # API keys y OLLAMA_URL
+├── .env                            # API keys y configuración Ollama/LM Studio
 ├── requirements.txt                # Dependencias Python (requests)
 ├── skills/
 │   ├── __init__.py                 # Loader dinámico + run_skill() + skills_context()
@@ -70,10 +73,20 @@ HackerAgent/
 
 ```ini
 OLLAMA_URL=http://192.168.80.120:11434/api/chat
+LMSTUDIO_URL=http://localhost:1234/v1
+LMSTUDIO_API_KEY=             # opcional si Require Authentication está activo
+LMSTUDIO_MAX_TOKENS=4096
+LMSTUDIO_TIMEOUT=600
+LMSTUDIO_STRUCTURED_OUTPUT=auto
+HACKERAGENT_LLM_BACKEND=lmstudio
 WPSCAN_API_KEY=...
 SHODAN_API_KEY=...
 VIRUSTOTAL_API_KEY=...
-WHITEINTEL_API_KEY=...
+DEEPSEEK_API_KEY=...
+OPENROUTER_API_KEY=...       # openrouter.ai — acceso a 200+ modelos cloud
+OPENROUTER_MODEL=anthropic/claude-sonnet-4
+TAVILY_API_KEY=...           # opcional; si falta usa Brave o DuckDuckGo
+BRAVE_SEARCH_API_KEY=...     # opcional; Brave Web Search API
 BROWSER=firefox
 
 # OSINT APIs (opcionales — los skills funcionan sin ellas con fallbacks)
@@ -348,6 +361,9 @@ Al elegir un proyecto existente muestra sus sesiones y ofrece reanudar una o ini
 | `sesion guardar <nombre>` | Guarda sesión con nombre |
 | `sesion cargar <nombre>` | Carga sesión previa |
 | `apikeys` | Muestra estado de API keys |
+| `investiga <tema>` | Busca y lee fuentes públicas; la IA sintetiza una solución con citas |
+| `activa modo investigación` | Mantiene investigación web activa en esa sesión |
+| `desactiva modo investigación` | Desactiva la búsqueda automática de esa sesión |
 | `reporte` / `html` | Genera reporte HTML + Markdown |
 | `listame vulnerabilidades` / `vulns` | Parsea log y lista vulns numeradas |
 | `explotar <N>` | Crea PoC para la vulnerabilidad número N |
@@ -406,7 +422,7 @@ Skill ejecutado (inline, rápido)
     │
     ├─ s_out, s_findings → ProjectState.ingest() / log
     │
-    └─ SubAgent thread ──► Ollama (contexto propio, 4096 tokens)
+    └─ SubAgent thread ──► backend activo (contexto propio, 4096 tokens)
                                │  system prompt: analista de seguridad
                                │  input: skill_name + target + output[:6000]
                                └─► {"summary", "key_findings", "next_step"}
@@ -418,7 +434,7 @@ Skill ejecutado (inline, rápido)
 
 - Si hay 3 skills → 3 SubAgents analizan en paralelo
 - Cada SubAgent tiene contexto propio — sin contaminación cruzada
-- Si Ollama no responde → `{"summary": "[SubAgent error]"}` sin romper el flujo
+- Si el backend LLM no responde → `{"summary": "[SubAgent error]"}` sin romper el flujo
 
 **Salida en terminal:**
 ```
@@ -567,10 +583,13 @@ Flask (web_server.py)
   ├── GET  /api/projects/<id>/sessions
   ├── POST /api/projects/<id>/sessions/<s>/chat  → SSE stream de eventos
   ├── GET  /api/projects/<id>/sessions/<s>/history
+  ├── GET/PUT /api/projects/<id>/sessions/<s>/research-mode
   ├── GET  /api/projects/<id>/sessions/<s>/skills
   ├── POST /api/projects/<id>/sessions/<s>/upload
   ├── GET  /api/projects/<id>/state
-  ├── GET  /api/models                → modelos Ollama disponibles
+  ├── GET  /api/models                → modelos del backend activo
+  ├── GET  /api/lmstudio/status       → diagnóstico, modelos, contexto y latencia
+  ├── POST /api/lmstudio/test         → prueba de inferencia mínima
   └── POST /api/projects/<id>/report
 ```
 
@@ -590,6 +609,8 @@ Flask (web_server.py)
 | `nuclei_findings` | `{findings[]}` CVEs de nuclei JSON |
 | `vuln_indicators` | `{indicators[]}` SQLi/XSS en respuesta HTTP |
 | `fetch_start/done` | URL fetched + preview |
+| `research_start/progress/done` | búsqueda, lectura de fuentes y resumen de evidencia |
+| `research_mode` | estado persistente del modo investigación por sesión |
 | `confirm_request` | comandos de alto riesgo (auto-confirmado en web) |
 | `skipped_cmd` | comando ya ejecutado o circuit-breaker |
 | `error` | error de ejecución |

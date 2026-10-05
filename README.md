@@ -37,7 +37,7 @@
 
 ## ✨ ¿Qué es HackerAgent?
 
-**HackerAgent** es un **agente autónomo de ciberseguridad** impulsado por Ollama, LM Studio o DeepSeek API. Orquesta **45 skills especializados** para realizar pentesting web, auditoría de Active Directory, ingeniería inversa, fuzzing inteligente, OSINT, desarrollo de herramientas y más. Con Ollama/LM Studio puede operar localmente; `--deepseek` activa el modo remoto rápido.
+**HackerAgent** es un **agente autónomo de ciberseguridad** con router multi-IA para Ollama, LM Studio, DeepSeek API y OpenRouter. Orquesta **45 skills especializados** para realizar pentesting web, auditoría de Active Directory, ingeniería inversa, fuzzing inteligente, OSINT, desarrollo de herramientas y más. En modo `auto` clasifica cada tarea, elige proveedor/modelo y aplica fallback si la primera opción falla.
 
 Tú describes el objetivo en **lenguaje natural** (o desde la **Web UI**) y el agente:
 1. 🧠 **Detecta automáticamente** el tipo de tarea
@@ -63,7 +63,8 @@ Tú describes el objetivo en **lenguaje natural** (o desde la **Web UI**) y el a
 | 🛠️ | **Desarrollo de código** | Payloads, malware, exploits con toolchain completo |
 | 📱 | **Pentesting móvil** | APK análisis estático + Frida dinámico |
 | 🕵️ | **OSINT completo** | 10 skills: emails, breaches, DNS, redes, teléfonos, metadata |
-| ⚡ | **Auto-instalación** | 37 herramientas se instalan solas si faltan |
+| ⚡ | **Auto-instalación** | 40 herramientas registradas + `requirements.txt`, verificadas bajo demanda |
+| 🔎 | **Investigación web** | Tavily/Brave o DuckDuckGo; lee fuentes, bloquea SSRF y responde con citas |
 | 🌐 | **Web UI** | SPA con chat, proyectos, dashboard, exportación, tools panel |
 
 </div>
@@ -95,7 +96,8 @@ ollama pull qwen2.5-coder:7b       # Código / Scripts
 
 # 5) Configurar .env
 cp .env.example .env 2>/dev/null || nano .env
-# Editar OLLAMA_URL si Ollama está en otra máquina
+# En LM Studio: Developer → Local Server → Start Server
+# También puedes ejecutar: lms server start
 
 # 6) ¡Ejecutar!
 python3 agent.py                    # Modo terminal
@@ -104,7 +106,7 @@ python3 agent.py --web --deepseek   # DeepSeek API + streaming + ejecución ráp
 # También se acepta el alias: --deepsek
 ```
 
-> ⚡ **Auto-instalación:** Al iniciar, HackerAgent verifica **37 herramientas** y las instala automáticamente si faltan (nmap, nuclei, ffuf, gobuster, subfinder, curl, etc.)
+> ⚡ **Auto-instalación:** escribe `instala dependencias` en CLI o Web UI. HackerAgent prepara `requirements.txt`, comprueba **40 herramientas**, instala lo faltante y verifica el resultado sin depender del LLM.
 
 </details>
 
@@ -117,10 +119,21 @@ python3 agent.py --web --deepseek   # DeepSeek API + streaming + ejecución ráp
 ```env
 # ── Backend LLM ──────────────────────────────────────────
 OLLAMA_URL="http://192.168.80.120:11434/api/chat"
-# LMSTUDIO_URL="http://localhost:1234/v1"
+LMSTUDIO_URL="http://localhost:1234/v1"
+LMSTUDIO_API_KEY=""                  # opcional si LM Studio exige autenticación
+LMSTUDIO_MAX_TOKENS="4096"           # entero positivo; no usa max_tokens=-1
+LMSTUDIO_TIMEOUT="600"
+LMSTUDIO_STRUCTURED_OUTPUT="auto"    # JSON Schema con fallback automático
+HACKERAGENT_LLM_BACKEND="lmstudio"   # auto | ollama | lmstudio | deepseek | openrouter
+HACKERAGENT_ROUTER_POLICY="balanced" # balanced | quality | local | cost
+HACKERAGENT_ROUTER_FALLBACKS="3"
 DEEPSEEK_API_KEY=""
 DEEPSEEK_API_URL="https://api.deepseek.com/v1"
 DEEPSEEK_MODEL="deepseek-chat"
+OPENROUTER_API_KEY=""
+OPENROUTER_MODEL="anthropic/claude-sonnet-4"
+TAVILY_API_KEY=""                    # opcional; búsqueda optimizada para agentes
+BRAVE_SEARCH_API_KEY=""              # opcional; Brave Web Search API
 # Ajustes opcionales del modo rápido
 HACKERAGENT_WORKERS="6"
 DEEPSEEK_MAX_TOKENS="8192"
@@ -157,6 +170,8 @@ python3 agent.py --web                   # http://127.0.0.1:7860
 python3 agent.py --web --port 8080       # Puerto personalizado
 python3 agent.py --web --host 0.0.0.0    # Accesible desde la LAN
 python3 agent.py --web --deepseek         # DeepSeek FAST en toda la app
+python3 agent.py --web --backend lmstudio # LM Studio local (predeterminado)
+python3 agent.py --web --backend auto     # Router por tarea + fallback opcional
 ```
 
 <div align="center">
@@ -165,13 +180,14 @@ python3 agent.py --web --deepseek         # DeepSeek FAST en toda la app
 |:--------|:------------|
 | ✨ **Diseño Animado** | Fondo con radial gradient ambient, glassmorphism, micro-animaciones |
 | 💬 **Chat interactivo** | Streaming SSE, thinking blocks colapsables, reveal secuencial |
-| 🧠 **DeepSeek Live** | Tokens, reasoning disponible, JSON completo y uso visibles en tiempo real |
+| 🧠 **LLM Live** | Streaming de LM Studio/DeepSeek/OpenRouter, reasoning, JSON y uso visibles |
 | ◫ **Asset Explorer** | Explora y previsualiza HTML, JS, CSS, imágenes, fonts y source maps descargados |
 | 📁 **Multi-proyecto** | CRUD completo: crear, editar ✏️, eliminar 🗑️ proyectos |
 | 🗨️ **Multi-sesión** | Múltiples chats por proyecto, renombrar, exportar 📥 |
 | 📊 **Dashboard** | Tarjetas de severidad, tabla de hallazgos, lista de subdominios |
-| 🔧 **Panel Tools** | Estado de 37 herramientas, instalación con un clic, barra de progreso |
-| ⚙️ **Config LLM** | Selector de backend (Ollama/LM Studio), modelos, skills toggle |
+| 🔧 **Instalador en chat** | Estado de 40 herramientas, instalación por lenguaje natural y progreso en vivo |
+| 🔎 **Modo investigación** | Toggle por sesión, búsqueda/lectura animada y fuentes clicables |
+| ⚙️ **Config LLM** | Selector multi-backend, diagnóstico e inferencia de prueba para LM Studio |
 | ⌨️ **Slash Menu** | Escribe `/` para 24+ comandos rápidos con autocomplete |
 | 📎 **Upload archivos** | Arrastra y suelta archivos que se inyectan en el contexto |
 | 🔄 **Auto-reconexión** | Reanuda streams SSE si se pierde la conexión |
@@ -378,13 +394,13 @@ diagnostica                              # Trigger por lenguaje natural
 
 ---
 
-## 🔧 Tool Manager — Auto-instalación de 37 herramientas
+## 🔧 Tool Manager — instalación completa bajo demanda
 
 <details>
 <summary><b>📦 Click para expandir — Herramientas que se instalan solas</b></summary>
 <br/>
 
-Al iniciar, HackerAgent verifica **37 herramientas** y las instala automáticamente si faltan:
+Al escribir `instala dependencias`, HackerAgent verifica `requirements.txt` y **40 herramientas registradas**, instala lo que falta y vuelve a comprobar cada ejecutable:
 
 | Categoría | Herramientas |
 |:----------|:-------------|
@@ -398,11 +414,14 @@ Al iniciar, HackerAgent verifica **37 herramientas** y las instala automáticame
 | 🔬 **Ing. Inversa** | radare2 |
 
 ```bash
-# Ver estado de herramientas en la Web UI
-# Pestaña 🔧 Tools
-# O desde terminal:
+# Desde el chat CLI o Web UI (también disponible como /dependencias)
+instala dependencias
+
+# Consultar el estado desde terminal:
 python3 -c "from tool_manager import scan_tools; print(scan_tools())"
 ```
+
+En Kali/Debian, los paquetes del sistema requieren iniciar HackerAgent con `sudo` o disponer de `sudo` sin contraseña. En Windows, las herramientas sin distribución nativa se reportan como pendientes para ejecutarlas desde Kali Linux o WSL; el instalador nunca afirma éxito hasta verificar el binario.
 
 </details>
 
@@ -667,6 +686,8 @@ python3 agent.py --session mi_auditoria   # Cargar sesión legacy
 python3 agent.py --list-sessions          # Listar sesiones
 python3 agent.py --no-wizard              # Sin wizard
 python3 agent.py --backend ollama         # Forzar backend
+python3 agent.py --backend lmstudio       # Forzar LM Studio
+python3 agent.py --backend auto           # Router multi-IA
 python3 agent.py --web                    # Web UI
 ```
 
@@ -683,7 +704,11 @@ python3 agent.py --web                    # Web UI
 | `reporte` / `html` | Genera reporte HTML + Markdown |
 | `apikeys` | Estado de las API keys |
 | `modelo <nombre>` | Cambia de modelo en caliente |
-| `backend [ollama/lmstudio]` | Cambia de backend LLM |
+| `backend [ollama/lmstudio/deepseek]` | Cambia de backend LLM |
+| `instala dependencias` | Instala y verifica Python + todas las herramientas registradas |
+| `investiga <tema>` | Busca en Internet, contrasta fuentes y responde con enlaces |
+| `activa modo investigación` | Investiga automáticamente las preguntas siguientes de la sesión |
+| `desactiva modo investigación` | Regresa al chat normal |
 | `sesiones` | Lista sesiones guardadas |
 | `sesion guardar/cargar <n>` | Guarda/reanuda sesión |
 | `cd <ruta>` | Cambia directorio de trabajo |
@@ -702,11 +727,11 @@ python3 agent.py --web                    # Web UI
 | **Auto-SKILL mapping** | Convierte comandos crudos (`nuclei -u X`, `subfinder -d X`) a SKILL: automáticamente |
 | **Gobuster wildcard** | Si gobuster detecta wildcard 403, reintenta con `--wildcard` solo |
 | **Nuclei path fixer** | Corrige rutas relativas y flags inválidos (`-categories` → `-tags`) |
-| **JSON enforcer** | Si el modelo devuelve markdown en vez de JSON, reenvía con instrucción explícita |
+| **Structured output** | LM Studio usa JSON Schema; si el modelo no lo soporta, conserva la respuesta textual |
 | **Hard truncate** | Si la compresión de contexto falla, descarta mensajes antiguos automáticamente |
 | **Circuit breaker** | Detecta y corta bucles de comandos repetidos (3+ iguales) |
 | **Scan cache 24h** | No re-escannea el mismo objetivo dentro de 24 horas |
-| **Auto-instalación** | 37 herramientas se instalan solas si faltan |
+| **Auto-instalación** | Frase determinística, progreso SSE y verificación posterior de Python + 40 herramientas |
 | **Auto-clasificador** | Distingue TP/FP automáticamente después de cada skill |
 | **Push-back con ejemplos** | Cuando el modelo no emite comandos, le inyecta ejemplos SKILL: |
 | **SubAgents paralelos** | Cada skill lanza análisis en hilo aparte (contexto limpio, sin contaminación) |
@@ -935,6 +960,7 @@ python3 agent.py --web --host 0.0.0.0   # acceso desde LAN
 | `reporte` / `html` | Genera reporte HTML dark-theme + Markdown |
 | `apikeys` | Estado de las API keys |
 | `modelo <nombre>` | Cambia el modelo de Ollama en caliente |
+| `instala dependencias` | Prepara y verifica el entorno completo sin usar el LLM |
 | `sesiones` | Lista las sesiones guardadas |
 | `sesion guardar/cargar <n>` | Guarda o reanuda una sesión |
 | `cd <ruta>` | Cambia el directorio de trabajo |

@@ -161,6 +161,23 @@ def _detect_backend() -> str:
     return "none"
 
 
+def _sanitize_messages(messages: list) -> list:
+    """Consolida todos los mensajes system en uno solo al inicio de la lista."""
+    system_parts = []
+    other_messages = []
+    for m in messages:
+        if m.get("role") == "system":
+            content = m.get("content", "").strip()
+            if content:
+                system_parts.append(content)
+        else:
+            other_messages.append(m)
+    if not system_parts:
+        return other_messages
+    merged_system = {"role": "system", "content": "\n\n".join(system_parts)}
+    return [merged_system] + other_messages
+
+
 def _call_llm(messages: list, temperature: float = 0.1, num_ctx: int = 32768,
               timeout: int = 60) -> tuple[str | None, float, str]:
     """Llama al LLM y retorna (content_str o None si error, elapsed_ms, error_msg)."""
@@ -193,9 +210,10 @@ def _call_llm(messages: list, temperature: float = 0.1, num_ctx: int = 32768,
                 return None, (time.time() - t0) * 1000, f"HTTP {r.status_code}: {r.text[:200]}"
             content = r.json()["message"]["content"]
         else:
+            clean_msgs = _sanitize_messages(messages)
             payload = {
                 "model": "local",
-                "messages": messages,
+                "messages": clean_msgs,
                 "temperature": temperature,
                 "max_tokens": num_ctx,
                 "stream": False,

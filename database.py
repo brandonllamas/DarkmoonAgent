@@ -59,6 +59,15 @@ def init_db():
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS session_settings (
+            session_id TEXT,
+            setting_key TEXT,
+            setting_value TEXT,
+            updated_at TEXT,
+            PRIMARY KEY (session_id, setting_key),
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS scan_cache (
             cmd_key TEXT PRIMARY KEY,
             project_id TEXT,
@@ -184,6 +193,8 @@ def rename_session(session_id: str, new_session_id: str) -> bool:
                          (new_session_id, session_id))
             conn.execute("UPDATE events SET session_id = ? WHERE session_id = ?",
                          (new_session_id, session_id))
+            conn.execute("UPDATE session_settings SET session_id = ? WHERE session_id = ?",
+                         (new_session_id, session_id))
             conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         return True
     except sqlite3.IntegrityError:
@@ -273,6 +284,48 @@ def get_turn_count(session_id: str) -> int:
     conn = get_db()
     row = conn.execute("SELECT COUNT(*) as cnt FROM messages WHERE session_id = ? AND role = 'user'", (session_id,)).fetchone()
     return row["cnt"] if row else 0
+
+
+# --- Session settings ---
+def set_session_setting(session_id: str, key: str, value: Any):
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO session_settings (session_id, setting_key, setting_value, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_id, setting_key) DO UPDATE SET
+            setting_value=excluded.setting_value,
+            updated_at=excluded.updated_at
+    """, (session_id, key, json.dumps(value, ensure_ascii=False), datetime.now().isoformat()))
+    conn.commit()
+
+
+def get_session_setting(session_id: str, key: str, default: Any = None) -> Any:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT setting_value FROM session_settings WHERE session_id = ? AND setting_key = ?",
+        (session_id, key),
+    ).fetchone()
+    if not row:
+        return default
+    try:
+        return json.loads(row["setting_value"])
+    except (TypeError, json.JSONDecodeError):
+        return row["setting_value"]
+
+
+def get_session_settings(session_id: str) -> Dict[str, Any]:
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT setting_key, setting_value FROM session_settings WHERE session_id = ?",
+        (session_id,),
+    ).fetchall()
+    settings = {}
+    for row in rows:
+        try:
+            settings[row["setting_key"]] = json.loads(row["setting_value"])
+        except (TypeError, json.JSONDecodeError):
+            settings[row["setting_key"]] = row["setting_value"]
+    return settings
 
 # --- Events ---
 def append_event(session_id: str, event: dict):

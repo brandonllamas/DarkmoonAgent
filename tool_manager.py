@@ -8,22 +8,57 @@ Usa confs.json como fuente de verdad para rutas y comandos de instalación.
 from __future__ import annotations
 
 import json
+import importlib.metadata
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from typing import Callable
 
 HERE = Path(__file__).parent
 CONFS_FILE = HERE / "confs.json"
+REQUIREMENTS_FILE = HERE / "requirements.txt"
+
+_DEPENDENCY_WORDS = re.compile(
+    r"\b(?:dependencias?|requisitos?|herramientas?|tools?|todo\s+lo\s+necesario|"
+    r"lo\s+que\s+necesit(?:e|es)|entorno\s+completo)\b",
+    re.I,
+)
+_INSTALL_WORDS = re.compile(r"\b(?:instala(?:r|me|las?)?|instale|install|prepara(?:r)?)\b", re.I)
+
+
+def is_dependency_install_request(message: str) -> bool:
+    """Return True for explicit natural-language requests to install dependencies."""
+    normalized = unicodedata.normalize("NFKD", str(message or ""))
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower().strip()
+    if re.search(r"\b(?:no|sin)\s+(?:instala(?:r|s)?|install)\b", normalized):
+        return False
+    return bool(_INSTALL_WORDS.search(normalized) and _DEPENDENCY_WORDS.search(normalized))
 
 
 # ── Tool definitions with install commands ─────────────────────────────────────
 # Extends confs.json with more detailed install methods
 TOOL_DEFS: dict[str, dict] = {
+    "curl": {
+        "check": ["curl", "--version"],
+        "install": {"apt": "apt-get install -y curl", "brew": "brew install curl"},
+        "category": "recon",
+    },
+    "dig": {
+        "check": ["dig", "-v"],
+        "install": {"apt": "apt-get install -y dnsutils", "brew": "brew install bind"},
+        "category": "recon",
+    },
+    "whois": {
+        "check": ["whois", "--version"],
+        "install": {"apt": "apt-get install -y whois", "brew": "brew install whois"},
+        "category": "recon",
+    },
     "nmap": {
         "check": ["nmap", "--version"],
         "install": {
@@ -286,7 +321,7 @@ TOOL_DEFS: dict[str, dict] = {
     },
     # ── Python dependencies for skills ──────────────────────────────────────
     "ldap3": {
-        "check": ["python3", "-c", "import ldap3; print(ldap3.__version__)"],
+        "check": [sys.executable, "-c", "import ldap3; print(ldap3.__version__)"],
         "install": {"pip": "pip3 install ldap3"},
         "category": "ad",
     },
@@ -308,7 +343,7 @@ TOOL_DEFS: dict[str, dict] = {
     "apktool": {
         "check": ["apktool", "--version"],
         "install": {
-            "apt": "apt-get install -x apktool",
+            "apt": "apt-get install -y apktool",
         },
         "category": "mobile",
     },
@@ -327,6 +362,8 @@ TOOL_DEFS: dict[str, dict] = {
 _TOOL_CACHE: dict[str, bool] = {}
 _INSTALLING: set[str] = set()
 _PROGRESS_CALLBACK: Callable | None = None
+_LAST_INSTALL_ERRORS: dict[str, str] = {}
+_APT_PREFIX_CACHE: str | None = None
 
 
 def set_progress_callback(cb: Callable | None):
@@ -335,9 +372,9 @@ def set_progress_callback(cb: Callable | None):
     _PROGRESS_CALLBACK = cb
 
 
-def _log(msg: str):
+def _log(msg: str, tool_name: str = "system"):
     if _PROGRESS_CALLBACK:
-        _PROGRESS_CALLBACK("system", msg)
+        _PROGRESS_CALLBACK(tool_name, msg)
     print(f"  [tool_manager] {msg}")
 
 
@@ -350,6 +387,87 @@ def _run(cmd: str, timeout: int = 60) -> tuple[str, str, int]:
         return "", f"Timeout ({timeout}s)", 1
     except Exception as e:
         return "", str(e), 1
+
+
+def _run_args(args: list[str], timeout: int = 60) -> tuple[str, str, int]:
+    """Run an argument vector without a shell (used for Python package installs)."""
+    try:
+        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        return result.stdout.strip(), result.stderr.strip(), result.returncode
+    except subprocess.TimeoutExpired:
+        return "", f"Timeout ({timeout}s)", 1
+    except Exception as exc:
+        return "", str(exc), 1
+
+
+def clear_tool_cache():
+    """Forget cached checks so the next scan verifies the real environment."""
+    _TOOL_CACHE.clear()
+
+
+def _command_text(parts: list[str]) -> str:
+    """Quote a command consistently for the current operating system."""
+    return subprocess.list2cmdline([str(part) for part in parts])
+
+
+def _add_go_bin_to_path():
+    """Expose GOPATH/bin to this process after a successful `go install`."""
+    if not shutil.which("go"):
+        return
+    stdout, _, code = _run("go env GOPATH", timeout=10)
+    if code != 0 or not stdout.strip():
+        return
+    go_bin = str(Path(stdout.strip().splitlines()[-1]) / "bin")
+    paths = os.environ.get("PATH", "").split(os.pathsep)
+    if go_bin not in paths:
+        os.environ["PATH"] = go_bin + os.pathsep + os.environ.get("PATH", "")
+
+
+def _apt_prefix() -> str:
+    """Return an apt command prefix that will not block waiting for a password."""
+    global _APT_PREFIX_CACHE
+    if _APT_PREFIX_CACHE is not None:
+        return _APT_PREFIX_CACHE
+    if not shutil.which("apt-get"):
+        _APT_PREFIX_CACHE = ""
+        return ""
+    is_root = bool(hasattr(os, "geteuid") and os.geteuid() == 0)
+    if is_root:
+        _APT_PREFIX_CACHE = "apt-get"
+        return _APT_PREFIX_CACHE
+    if shutil.which("sudo"):
+        _, _, code = _run("sudo -n true", timeout=8)
+        if code == 0:
+            _APT_PREFIX_CACHE = "sudo -n apt-get"
+            return _APT_PREFIX_CACHE
+    _APT_PREFIX_CACHE = ""
+    return ""
+
+
+def _prepare_install_command(method: str, raw_command: str) -> tuple[str, str]:
+    """Adapt a declared install command to the current Python and privilege level."""
+    command = str(raw_command or "").strip()
+    if method == "apt":
+        prefix = _apt_prefix()
+        if not prefix:
+            return "", "apt requiere ejecutar HackerAgent como root o sudo sin contraseña"
+        command = re.sub(r"^apt-get\b", prefix, command)
+    elif method == "pip":
+        python = _command_text([sys.executable])
+        command = re.sub(
+            r"^(?:pip3?|py\s+-m\s+pip)\s+install\b",
+            lambda _: f"{python} -m pip install",
+            command,
+        )
+        command = command.replace(" -q ", " ")
+        command = command.replace(
+            " -m pip install ",
+            " -m pip install --disable-pip-version-check ",
+            1,
+        )
+    elif method == "curl" and os.name == "nt":
+        return "", "el instalador por curl requiere un shell Unix"
+    return command, ""
 
 
 def check_tool(tool_name: str) -> bool:
@@ -374,18 +492,20 @@ def check_tool(tool_name: str) -> bool:
         _TOOL_CACHE[tool_name] = found
         return found
 
-    check_cmd = td.get("check", [tool_name, "--version"])
+    check_cmd = [str(part) for part in td.get("check", [tool_name, "--version"])]
     binary = check_cmd[0]
-    found = shutil.which(binary) is not None
+    binary_is_current_python = Path(binary).resolve() == Path(sys.executable).resolve()
+    found = binary_is_current_python or shutil.which(binary) is not None
 
     if found:
         # Verify it actually works
-        so, _, code = _run(" ".join(check_cmd), timeout=10)
-        if code == 0 and so:
+        so, se, code = _run(_command_text(check_cmd), timeout=10)
+        if code == 0:
             _TOOL_CACHE[tool_name] = True
             return True
         # Some tools return non-zero for --version
-        if so and not so.startswith("command not found"):
+        combined = (so or se).strip()
+        if combined and "command not found" not in combined.lower() and "not recognized" not in combined.lower():
             _TOOL_CACHE[tool_name] = True
             return True
 
@@ -404,50 +524,53 @@ def _load_confs() -> list:
         return []
 
 
-def get_install_command(tool_name: str) -> str:
-    """Get the best install command for a tool based on available package managers."""
+def get_install_candidates(tool_name: str) -> list[tuple[str, str]]:
+    """Return usable install methods in priority order for the current host."""
     td = TOOL_DEFS.get(tool_name)
     if not td:
-        return ""
+        return []
 
     install_methods = td.get("install", {})
-
-    # Priority order of install methods
-    priorities = []
-    if shutil.which("apt-get"):
-        priorities.append("apt")
-    if shutil.which("brew"):
-        priorities.append("brew")
-    if shutil.which("go"):
-        priorities.append("go")
-    if shutil.which("pip3") or shutil.which("pip"):
-        priorities.append("pip")
-    if shutil.which("gem"):
-        priorities.append("gem")
-    if shutil.which("cargo"):
-        priorities.append("cargo")
-
-    # Always try curl as last resort
-    priorities.append("curl")
-
+    available = {
+        "apt": bool(shutil.which("apt-get")),
+        "brew": bool(shutil.which("brew")),
+        "go": bool(shutil.which("go")),
+        "pip": True,
+        "gem": bool(shutil.which("gem")),
+        "cargo": bool(shutil.which("cargo")),
+        "winget": bool(shutil.which("winget")),
+        "choco": bool(shutil.which("choco")),
+        "scoop": bool(shutil.which("scoop")),
+        "curl": bool(shutil.which("curl")) and os.name != "nt",
+    }
+    priorities = ["apt", "brew", "winget", "choco", "scoop", "go", "pip", "gem", "cargo", "curl"]
+    candidates: list[tuple[str, str]] = []
     for method in priorities:
-        if method in install_methods:
-            return install_methods[method]
+        if not available.get(method) or method not in install_methods:
+            continue
+        command, reason = _prepare_install_command(method, install_methods[method])
+        if command:
+            candidates.append((method, command))
+        elif reason:
+            _LAST_INSTALL_ERRORS[tool_name] = reason
+    return candidates
 
-    # Fallback: return the first available method
-    for method in ["apt", "brew", "pip", "go", "curl", "gem"]:
-        if method in install_methods:
-            return install_methods[method]
 
-    return ""
+def get_install_command(tool_name: str) -> str:
+    """Get the best usable install command for compatibility with older callers."""
+    candidates = get_install_candidates(tool_name)
+    return candidates[0][1] if candidates else ""
 
 
-def install_tool(tool_name: str, force: bool = False) -> bool:
+def install_tool(tool_name: str, force: bool = False, progress: Callable | None = None) -> bool:
     """
     Install a tool. Returns True if successful.
     If already installed and not force, returns True immediately.
     """
+    tool_name = str(tool_name or "").strip().lower()
     if not force and check_tool(tool_name):
+        if progress:
+            progress({"scope": "tool", "name": tool_name, "status": "already", "message": "Ya estaba instalada"})
         return True
 
     if tool_name in _INSTALLING:
@@ -458,39 +581,47 @@ def install_tool(tool_name: str, force: bool = False) -> bool:
     _TOOL_CACHE.pop(tool_name, None)
 
     try:
-        install_cmd = get_install_command(tool_name)
-        if not install_cmd:
-            _log(f"  ⚠ {tool_name}: no se encontró método de instalación")
+        candidates = get_install_candidates(tool_name)
+        if not candidates:
+            reason = _LAST_INSTALL_ERRORS.get(tool_name) or "no hay un método compatible con este sistema"
+            _LAST_INSTALL_ERRORS[tool_name] = reason
+            _log(f"  ⚠ {tool_name}: {reason}", tool_name)
+            if progress:
+                progress({"scope": "tool", "name": tool_name, "status": "unsupported", "message": reason})
             return False
 
-        _log(f"  📦 Instalando {tool_name}...")
+        failures: list[str] = []
+        for method, install_cmd in candidates:
+            _log(f"  📦 Instalando {tool_name} con {method}...", tool_name)
+            if progress:
+                progress({"scope": "tool", "name": tool_name, "status": "installing", "method": method,
+                          "message": f"Instalando con {method}"})
+            stdout, stderr, code = _run(install_cmd, timeout=900)
+            if method == "go":
+                _add_go_bin_to_path()
+            _TOOL_CACHE.pop(tool_name, None)
+            verified = code == 0 and check_tool(tool_name)
+            if verified:
+                _LAST_INSTALL_ERRORS.pop(tool_name, None)
+                _log(f"  ✅ {tool_name} instalado y verificado", tool_name)
+                post = TOOL_DEFS.get(tool_name, {}).get("post_install", "")
+                if post:
+                    _log(f"  ⚙  Ejecutando post-install: {post}", tool_name)
+                    _run(post, timeout=300)
+                if progress:
+                    progress({"scope": "tool", "name": tool_name, "status": "ready", "method": method,
+                              "message": "Instalada y verificada"})
+                return True
+            detail = (stderr or stdout or f"exit {code}").strip().replace("\n", " ")[:300]
+            failures.append(f"{method}: {detail}")
 
-        # If it's a pip install, use --quiet
-        if install_cmd.startswith("pip"):
-            install_cmd = install_cmd.replace("pip3 install", "pip3 install -q --disable-pip-version-check")
-            install_cmd = install_cmd.replace("pip install", "pip install -q --disable-pip-version-check")
-
-        if install_cmd.startswith("go install"):
-            # Go installs to GOPATH/bin, add to PATH
-            install_cmd = f"export PATH=$PATH:$(go env GOPATH)/bin && {install_cmd}"
-
-        stdout, stderr, code = _run(install_cmd, timeout=300)
-
-        if code == 0:
-            _log(f"  ✅ {tool_name} instalado correctamente")
-            _TOOL_CACHE[tool_name] = True
-
-            # Post-install steps (e.g., nuclei -update-templates)
-            post = TOOL_DEFS.get(tool_name, {}).get("post_install", "")
-            if post:
-                _log(f"  ⚙  Ejecutando post-install: {post}")
-                _run(post, timeout=120)
-
-            return True
-        else:
-            _log(f"  ❌ {tool_name}: error de instalación:\n    {stderr[:500]}")
-            _TOOL_CACHE[tool_name] = False
-            return False
+        reason = " | ".join(failures) or "la instalación no pudo verificarse"
+        _LAST_INSTALL_ERRORS[tool_name] = reason
+        _log(f"  ❌ {tool_name}: {reason[:500]}", tool_name)
+        _TOOL_CACHE[tool_name] = False
+        if progress:
+            progress({"scope": "tool", "name": tool_name, "status": "failed", "message": reason[:300]})
+        return False
     except Exception as e:
         _log(f"  ❌ {tool_name}: excepción: {e}")
         _TOOL_CACHE[tool_name] = False
@@ -532,17 +663,197 @@ def ensure_python_package(package: str, import_name: str | None = None) -> bool:
     return False
 
 
-def scan_tools(category: str | None = None) -> dict[str, bool]:
+def _requirement_names(requirements_file: Path = REQUIREMENTS_FILE) -> list[str]:
+    """Extract distribution names from a regular requirements.txt file."""
+    if not requirements_file.exists():
+        return []
+    names: list[str] = []
+    for raw in requirements_file.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or line.startswith(("-", "git+", "http://", "https://")):
+            continue
+        match = re.match(r"([A-Za-z0-9_.-]+)", line)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
+def python_dependency_status(requirements_file: Path = REQUIREMENTS_FILE) -> dict[str, bool]:
+    """Check the Python distributions declared by requirements.txt."""
+    status: dict[str, bool] = {}
+    for name in _requirement_names(requirements_file):
+        try:
+            importlib.metadata.version(name)
+            status[name] = True
+        except importlib.metadata.PackageNotFoundError:
+            status[name] = False
+    return status
+
+
+def install_python_dependencies(requirements_file: Path = REQUIREMENTS_FILE,
+                                progress: Callable | None = None) -> dict:
+    """Install and verify the application's Python runtime requirements."""
+    before = python_dependency_status(requirements_file)
+    missing = [name for name, ready in before.items() if not ready]
+    result = {
+        "total": len(before),
+        "ready_before": sum(1 for ready in before.values() if ready),
+        "installed": [],
+        "failed": [],
+        "success": True,
+        "pip_check": "",
+    }
+    if progress:
+        progress({"scope": "python", "name": "requirements.txt", "status": "installing",
+                  "message": f"Verificando constraints; {len(missing)} paquete(s) faltante(s)"})
+    if not requirements_file.exists():
+        result.update({"failed": missing or ["requirements.txt"], "success": False})
+        return result
+    _, stderr, code = _run_args([
+        sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+        "-r", str(requirements_file),
+    ], timeout=1200)
+    after = python_dependency_status(requirements_file)
+    result["installed"] = [name for name in missing if after.get(name)]
+    result["failed"] = [name for name in missing if not after.get(name)]
+    _, pip_check_err, pip_check_code = _run_args(
+        [sys.executable, "-m", "pip", "check"], timeout=120,
+    )
+    result["pip_check"] = pip_check_err[:500] if pip_check_code else "ok"
+    result["success"] = code == 0 and not result["failed"] and pip_check_code == 0
+    if progress:
+        progress({
+            "scope": "python", "name": "requirements.txt",
+            "status": "ready" if result["success"] else "failed",
+            "message": "Dependencias Python verificadas" if result["success"] else
+                       (stderr or pip_check_err or "No se pudieron verificar todos los paquetes")[:300],
+        })
+    return result
+
+
+def scan_tools(category: str | None = None, refresh: bool = False) -> dict[str, bool]:
     """
     Scan all known tools and return their installation status.
     If category is specified, only scan tools in that category.
     """
+    if refresh:
+        clear_tool_cache()
+        _add_go_bin_to_path()
     results: dict[str, bool] = {}
     for tool_name, td in TOOL_DEFS.items():
         if category and td.get("category") != category:
             continue
         results[tool_name] = check_tool(tool_name)
     return results
+
+
+def _emit_progress(callback: Callable | None, **event):
+    if not callback:
+        return
+    try:
+        callback(event)
+    except Exception:
+        pass
+
+
+def install_all_dependencies(category: str | None = None,
+                             progress: Callable | None = None) -> dict:
+    """Install requirements.txt and every missing tool known by HackerAgent."""
+    started = time.monotonic()
+    _emit_progress(progress, scope="system", name="environment", status="scanning",
+                   message="Comprobando Python y herramientas del sistema", current=0, total=1)
+    before = scan_tools(category, refresh=True)
+    missing = [name for name, ready in before.items() if not ready]
+    total_steps = 1 + len(missing)
+    _emit_progress(progress, scope="system", name="environment", status="start",
+                   message=f"{len(missing)} herramienta(s) por preparar", current=0, total=total_steps)
+
+    python_result = install_python_dependencies(progress=progress)
+    _emit_progress(progress, scope="system", name="python", status="step_done",
+                   message="Entorno Python comprobado", current=1, total=total_steps)
+
+    installed: list[str] = []
+    failed: list[str] = []
+    unsupported: list[str] = []
+    for index, tool_name in enumerate(missing, start=1):
+        current = index
+
+        def forward(event: dict, *, _current=current):
+            payload = dict(event)
+            payload.update({"current": _current, "total": total_steps})
+            _emit_progress(progress, **payload)
+
+        ok = install_tool(tool_name, progress=forward)
+        if ok:
+            installed.append(tool_name)
+        else:
+            reason = _LAST_INSTALL_ERRORS.get(tool_name, "instalación no verificada")
+            if "no hay un método" in reason or "requiere ejecutar" in reason or "requiere un shell" in reason:
+                unsupported.append(tool_name)
+            else:
+                failed.append(tool_name)
+        _emit_progress(progress, scope="system", name=tool_name, status="step_done",
+                       message=f"{tool_name}: {'lista' if ok else 'pendiente'}",
+                       current=index + 1, total=total_steps)
+
+    after = scan_tools(category, refresh=True)
+    ready_after = [name for name, ready in after.items() if ready]
+    still_missing = [name for name, ready in after.items() if not ready]
+    # Verification is authoritative even if an installer returned an optimistic result.
+    installed = [name for name in installed if after.get(name)]
+    unsupported = [name for name in unsupported if name in still_missing]
+    failed = [name for name in still_missing if name not in unsupported]
+    error_details = {name: _LAST_INSTALL_ERRORS.get(name, "No se pudo verificar") for name in still_missing}
+    report = {
+        "schema_version": 1,
+        "platform": {"system": platform.system(), "release": platform.release(), "python": sys.version.split()[0]},
+        "success": bool(python_result.get("success")) and not still_missing,
+        "duration_seconds": round(time.monotonic() - started, 2),
+        "python": python_result,
+        "tools": {
+            "total": len(after),
+            "ready_before": sum(1 for ready in before.values() if ready),
+            "ready_after": len(ready_after),
+            "already_ready": [name for name, ready in before.items() if ready],
+            "installed": installed,
+            "failed": failed,
+            "unsupported": unsupported,
+            "missing": still_missing,
+            "errors": error_details,
+        },
+    }
+    _emit_progress(progress, scope="system", name="environment",
+                   status="complete" if report["success"] else "partial",
+                   message="Instalación completa" if report["success"] else
+                           f"Entorno parcial: {len(still_missing)} herramienta(s) pendiente(s)",
+                   current=total_steps, total=total_steps)
+    return report
+
+
+def format_dependency_report(report: dict) -> str:
+    """Create a concise Spanish summary suitable for CLI and chat history."""
+    tools = report.get("tools", {})
+    python_result = report.get("python", {})
+    ready = int(tools.get("ready_after", 0))
+    total = int(tools.get("total", 0))
+    installed = list(tools.get("installed", []))
+    missing = list(tools.get("missing", []))
+    lines = [
+        "✅ Entorno preparado y verificado." if report.get("success") else "⚠️ Instalación completada parcialmente.",
+        f"Python: {python_result.get('total', 0) - len(python_result.get('failed', []))}/{python_result.get('total', 0)} dependencias listas.",
+        f"Herramientas: {ready}/{total} disponibles.",
+    ]
+    if installed:
+        lines.append(f"Instaladas ahora: {', '.join(installed)}.")
+    if missing:
+        lines.append(f"Pendientes: {', '.join(missing)}.")
+        system = str(report.get("platform", {}).get("system", ""))
+        if system == "Windows":
+            lines.append("Las herramientas ofensivas sin instalador nativo deben ejecutarse desde Kali Linux o WSL.")
+        elif any("requiere ejecutar" in str(value) for value in tools.get("errors", {}).values()):
+            lines.append("Para completar paquetes del sistema, inicia HackerAgent con sudo/root y repite “instala dependencias”.")
+    lines.append(f"Verificación terminada en {report.get('duration_seconds', 0)} s.")
+    return "\n".join(lines)
 
 
 def get_tool_status_table(category: str | None = None) -> str:

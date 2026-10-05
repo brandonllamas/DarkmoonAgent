@@ -29,8 +29,17 @@ import mimetypes
 from urllib.parse import quote
 from datetime import datetime
 from pathlib import Path
+from research_engine import (
+    build_research_context,
+    fallback_research_summary,
+    parse_research_command,
+    research_query_for_message,
+    research_web,
+)
 
 _ACTIVE_SESSIONS = {}
+_BACKEND_REFRESH_LOCK = threading.Lock()
+_BACKEND_REFRESHING = False
 
 _DOMAIN_AVAILABILITY_TRIGGER = re.compile(
     r"\b(?:verifica(?:r)?|comprueba|revisa|chequea)\s+(?:la\s+)?"
@@ -68,13 +77,15 @@ def _exploit_workflow_context(user_message: str) -> str:
 # Events that should be persisted so they can be replayed when reloading a session
 _PERSIST_EVENT_TYPES = {
     "thinking", "message",
-    "llm_stream_end",
+    "llm_stream_end", "model_route",
     "command_start", "command_done",
     "skill_start", "skill_done",
     "fetch_start", "fetch_done",
     "file_ready", "new_findings",
     "nuclei_findings", "vuln_indicators",
     "classification_done",
+    "dependency_start", "dependency_done",
+    "research_mode", "research_done",
     "error",
 }
 
@@ -150,7 +161,6 @@ def _ensure_flask():
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
             print("[web] Flask instalado correctamente.")
-            return True
         except Exception as e:
             print(f"[web] ERROR: No se pudo instalar Flask: {e}")
             print("[web] Ejecuta manualmente: pip install flask")
@@ -167,10 +177,11 @@ sys.path.insert(0, str(_HERE))
 
 from agent import (
     OLLAMA_URL, LMSTUDIO_URL, DEEPSEEK_API_URL, DEEPSEEK_API_KEY,
+    OPENROUTER_API_URL, OPENROUTER_API_KEY,
     OUT_DIR, BASE_DIR,
     LLM_BACKEND,
     call_llm, call_llm_stream, call_ollama,
-    check_backend, check_ollama, check_lmstudio, check_deepseek,
+    check_backend, check_ollama, check_lmstudio, check_deepseek, check_openrouter,
     _backend_display_name, _backend_url,
     parse_skill_call,
     load_skills, skill_names,
@@ -191,7 +202,9 @@ from agent import (
     run_command as _agent_run_command,
     is_parallel_safe,
     run_skill as _run_skill,
-    get_model, get_model_auto, get_model_lmstudio, get_model_deepseek,
+    get_model, get_model_auto, get_model_lmstudio, get_model_deepseek, get_model_openrouter,
+    get_model_catalog, select_llm_route,
+    lmstudio_diagnostics,
     _SUBDOMAIN_TRIGGER, _PENTEST_TRIGGER,
     sanitize_commands,
 )
@@ -396,15 +409,136 @@ def _process_chat_turn(
         # Ensure session exists in database (for FOREIGN KEY constraints on events)
         database.create_session(session_name, project_dir.name, saved_model or model)
 
+        # Research mode is session-scoped and can be toggled without an LLM.
+        research_action, _direct_research_query = parse_research_command(user_message)
+        if research_action in ("enable", "disable", "status"):
+            enabled = bool(database.get_session_setting(session_name, "research_mode", False))
+            if research_action == "enable":
+                enabled = True
+                reply = (
+                    "🔎 **Modo investigación activado.** Las próximas preguntas buscarán en Internet, "
+                    "leerán varias fuentes y responderán con enlaces verificables."
+                )
+            elif research_action == "disable":
+                enabled = False
+                reply = "**Modo investigación desactivado.** Las próximas preguntas usarán el chat normal."
+            else:
+                reply = f"Modo investigación: **{'activado' if enabled else 'desactivado'}**."
+            if research_action != "status":
+                database.set_session_setting(session_name, "research_mode", enabled)
+            actual_model = saved_model or model or "system"
+            conversation.append({"role": "user", "content": user_message})
+            assistant_payload = {
+                "thinking": "", "commands": [], "message": reply,
+                "requires_confirmation": False, "task_complete": True,
+                "risk_level": "low", "phase": "report", "needs_api_keys": [],
+                "open_browser": "", "fetch_url": "",
+            }
+            conversation.append({"role": "assistant", "content": json.dumps(assistant_payload, ensure_ascii=False)})
+            save_session(session_name, conversation, actual_model, project_dir)
+            emit({"type": "research_mode", "enabled": enabled})
+            emit({"type": "message", "content": reply, "phase": "report", "risk": "low"})
+            emit({"type": "done", "session": session_name})
+            return
+
+        # An explicit dependency request is a deterministic system action: it must
+        # work even when LM Studio/Ollama is offline and therefore bypasses the LLM.
+        import tool_manager as _tools
+        if _tools.is_dependency_install_request(user_message):
+            actual_model = saved_model or model or "system"
+            conversation.append({"role": "user", "content": user_message})
+            save_session(session_name, conversation, actual_model, project_dir)
+            log = LogWriter(session_name, project_dir)
+            log.separator()
+            log.user_input(user_message)
+            emit({"type": "dependency_start", "message": "Comprobando el entorno completo"})
+
+            def _dependency_progress(event: dict):
+                emit({"type": "dependency_progress", **event})
+
+            try:
+                report = _tools.install_all_dependencies(progress=_dependency_progress)
+                summary = _tools.format_dependency_report(report)
+            except Exception as exc:
+                report = {"success": False, "python": {}, "tools": {"total": 0, "ready_after": 0,
+                          "installed": [], "missing": [], "failed": [], "unsupported": []}}
+                summary = f"❌ No se pudo completar la instalación: {exc}"
+            emit({"type": "dependency_done", "report": report, "summary": summary})
+            assistant_payload = {
+                "thinking": "", "commands": [], "message": summary,
+                "requires_confirmation": False, "task_complete": True,
+                "risk_level": "low" if report.get("success") else "medium",
+                "phase": "report", "install_needed": report.get("tools", {}).get("missing", []),
+                "needs_api_keys": [], "open_browser": "", "fetch_url": "",
+            }
+            conversation.append({"role": "assistant", "content": json.dumps(assistant_payload, ensure_ascii=False)})
+            save_session(session_name, conversation, actual_model, project_dir)
+            log.message(summary)
+            emit({"type": "message", "content": summary, "phase": "report",
+                  "risk": "low" if report.get("success") else "medium"})
+            emit({"type": "done", "session": session_name})
+            return
+
+        research_mode = bool(database.get_session_setting(session_name, "research_mode", False))
+        research_query = research_query_for_message(user_message, research_mode)
+        research_turn = bool(research_query)
+        research_context = ""
+        research_report = None
+        if research_turn:
+            emit({"type": "research_start", "query": research_query,
+                  "mode_enabled": research_mode})
+
+            def _research_progress(event: dict):
+                emit({"type": "research_progress", **event})
+
+            research_report = research_web(research_query, progress=_research_progress)
+            research_context = build_research_context(research_report)
+            sources = [
+                {"index": item.get("index"), "title": item.get("title", ""),
+                 "url": item.get("url", ""), "snippet": item.get("snippet", "")[:500]}
+                for item in research_report.get("results", [])
+            ]
+            emit({
+                "type": "research_done", "success": bool(research_report.get("success")),
+                "query": research_query, "provider": research_report.get("provider", "none"),
+                "sources": sources, "fetched": research_report.get("fetched", 0),
+                "errors": research_report.get("errors", [])[:4],
+            })
+
+        import agent as _ag
         actual_model = saved_model or model
+        if _ag.LLM_BACKEND == "auto":
+            # En Auto IA se guarda el selector, no el último modelo físico usado.
+            requested = model or saved_model or "auto"
+            actual_model = requested if requested != "unknown" else "auto"
         # Una sesión puede haberse creado con Ollama y reanudarse ahora con
         # --deepseek. No enviar nombres locales (p. ej. deepseek-r1:14b) a la API.
+        backend_ok = False
         try:
             backend_ok, backend_models = check_backend()
             if backend_ok and backend_models and actual_model not in backend_models:
-                actual_model = model if model in backend_models else backend_models[0]
+                actual_model = "auto" if _ag.LLM_BACKEND == "auto" else (
+                    model if model in backend_models else backend_models[0]
+                )
         except Exception:
             pass
+        if research_turn and not backend_ok:
+            summary = fallback_research_summary(research_report or {})
+            conversation.append({"role": "user", "content": user_message})
+            conversation.append({"role": "assistant", "content": json.dumps({
+                "thinking": "", "commands": [], "message": summary,
+                "requires_confirmation": False, "task_complete": True,
+                "risk_level": "medium", "phase": "report", "needs_api_keys": [],
+                "open_browser": "", "fetch_url": "",
+            }, ensure_ascii=False)})
+            save_session(session_name, conversation, actual_model or "system", project_dir)
+            emit({"type": "message", "content": summary, "phase": "report", "risk": "medium"})
+            emit({"type": "done", "session": session_name})
+            return
+        if _ag.LLM_BACKEND == "auto" and not backend_ok:
+            emit({"type": "error", "content": "Auto IA no encontró modelos disponibles. Inicia Ollama/LM Studio o configura DeepSeek/OpenRouter."})
+            emit({"type": "done", "session": session_name})
+            return
         # If model is unknown, try to get a real one
         if actual_model == "unknown" or not actual_model:
             try:
@@ -419,10 +553,14 @@ def _process_chat_turn(
                         ok3, models3 = check_deepseek()
                         if ok3 and models3:
                             actual_model = models3[0]
+                        else:
+                            ok4, models4 = check_openrouter()
+                            if ok4 and models4:
+                                actual_model = models4[0]
             except Exception:
                 pass
             if actual_model == "unknown" or not actual_model:
-                emit({"type": "error", "content": "No hay modelos disponibles. Verifica Ollama/LM Studio/DeepSeek."})
+                emit({"type": "error", "content": "No hay modelos disponibles. Verifica Ollama/LM Studio/DeepSeek/OpenRouter."})
                 emit({"type": "done", "session": session_name})
                 return
 
@@ -431,11 +569,14 @@ def _process_chat_turn(
             "WPSCAN_API_KEY", "SHODAN_API_KEY", "VIRUSTOTAL_API_KEY", "WHITEINTEL_API_KEY",
         ]}
         user_content = f"[API Keys: {json.dumps(available_keys)}]\n{user_message}"
-        user_content += _exploit_workflow_context(user_message)
+        if not research_turn:
+            user_content += _exploit_workflow_context(user_message)
         if uploaded_file_content:
             user_content += f"\n\n[ARCHIVO ADJUNTO — contenido textual]\n{uploaded_file_content[:12000]}"
         if uploaded_file_paths:
             user_content += f"\n\n[ARCHIVOS DISPONIBLES LOCALMENTE]\n{uploaded_file_paths}\n\nPuedes usar estos archivos con los SKILLs correspondientes (ej: SKILL:apk_analyze target=RUTA_DEL_ARCHIVO, SKILL:ing_inversa target=RUTA_DEL_ARCHIVO). Las rutas son absolutas y el archivo ya está guardado en disco."
+        if research_context:
+            user_content += f"\n\n{research_context}"
 
         conversation.append({"role": "user", "content": user_content})
 
@@ -450,7 +591,7 @@ def _process_chat_turn(
         # Explicit skills execute alone: do not let the model expand them into
         # a different scan such as Nuclei.
         explicit_skill, explicit_args = parse_skill_call(user_message)
-        if explicit_skill:
+        if explicit_skill and not research_turn:
             if explicit_skill == "web_asset_mirror":
                 explicit_args.setdefault("output_dir", str(project_dir / "web_assets"))
             emit({"type": "skill_start", "skill": explicit_skill, "args": explicit_args})
@@ -488,7 +629,7 @@ def _process_chat_turn(
             return
 
         # Verify previously discovered domains without waiting for an LLM.
-        if _DOMAIN_AVAILABILITY_TRIGGER.search(user_message):
+        if not research_turn and _DOMAIN_AVAILABILITY_TRIGGER.search(user_message):
             from urllib.parse import urlparse
             import concurrent.futures
             import requests
@@ -587,7 +728,7 @@ def _process_chat_turn(
             r'(?:ips?|hosts?|targets?|c[aá]maras?|dispositivos?))\s*$',
             re.I,
         )
-        if _ips_pat.match(user_message.strip()):
+        if not research_turn and _ips_pat.match(user_message.strip()):
             ip_set = []
             seen_ips: set = set()
             type_map: dict = {}
@@ -618,7 +759,7 @@ def _process_chat_turn(
             return
 
         # ── Subdominios: detecta "subdominios de dominio.com" ──────────────────
-        sub_match = _SUBDOMAIN_TRIGGER.search(user_message)
+        sub_match = None if research_turn else _SUBDOMAIN_TRIGGER.search(user_message)
         if sub_match:
             sub_domain = sub_match.group(1).strip().rstrip(".")
             emit({"type": "status", "content": f"🔍 Enumerando subdominios de {sub_domain}…"})
@@ -722,7 +863,7 @@ def _process_chat_turn(
         # ── Auto-optimización antes de cada turno ────────────────────────────
         try:
             from agent import _SKILLS_AVAILABLE as _sk_avail
-            if _sk_avail:
+            if _sk_avail and not research_turn:
                 # Detectar tarea y optimizar
                 _opt_input = user_message[:200]
                 _opt_result = _run_skill("auto_optimizer", action="auto", input=_opt_input)
@@ -735,11 +876,11 @@ def _process_chat_turn(
         def _call_agent_model() -> dict:
             """DeepSeek en streaming con lotes pequeños; fallback compatible para local."""
             import agent as _ag
-            if _ag.LLM_BACKEND != "deepseek":
+            if _ag.LLM_BACKEND not in ("auto", "deepseek", "openrouter", "lmstudio"):
                 return call_llm(actual_model, conversation)
 
             emit({"type": "llm_stream_start", "model": actual_model,
-                  "backend": "deepseek"})
+                  "backend": _ag.LLM_BACKEND})
             pending = {"kind": "", "text": "", "last": time.monotonic()}
 
             def _flush(force: bool = False):
@@ -765,7 +906,10 @@ def _process_chat_turn(
                 raw = result.pop("_stream_raw", "")
                 reasoning = result.pop("_reasoning_content", "")
                 usage = result.pop("_usage", {})
-                emit({"type": "llm_stream_end", "model": actual_model,
+                route_info = result.get("_routing", {})
+                emit({"type": "llm_stream_end",
+                      "model": route_info.get("model", actual_model),
+                      "backend": route_info.get("backend", _ag.LLM_BACKEND),
                       "raw": raw[:100000], "reasoning": reasoning[:100000],
                       "usage": usage})
                 return result
@@ -795,8 +939,12 @@ def _process_chat_turn(
                     _nudge = "Continúa. Emite los comandos SKILL necesarios o marca task_complete:true."
                 conversation.append({"role": "user", "content": _nudge})
 
-            # Call the active backend (DeepSeek streams every token to the UI).
-            emit({"type": "status", "content": f"Consultando {actual_model}…"})
+            # Auto IA clasifica la tarea antes de consultar al proveedor.
+            status_text = (
+                "Auto IA evaluando tarea y modelos disponibles…"
+                if _ag.LLM_BACKEND == "auto" else f"Consultando {actual_model}…"
+            )
+            emit({"type": "status", "content": status_text})
             try:
                 resp = _call_agent_model()
             except Exception as e:
@@ -815,7 +963,32 @@ def _process_chat_turn(
                     emit({"type": "error", "content": f"Error {_backend_display_name()}: {e}"})
                     break
 
+            route_info = resp.get("_routing", {})
+            if route_info:
+                emit({
+                    "type": "model_route",
+                    "backend": route_info.get("backend", ""),
+                    "backend_name": route_info.get("backend_name", ""),
+                    "model": route_info.get("model", ""),
+                    "profile": route_info.get("profile", "general"),
+                    "policy": route_info.get("policy", "balanced"),
+                    "reason": route_info.get("reason", ""),
+                    "fallbacks": route_info.get("fallbacks", []),
+                })
+
             _last_json_err = bool(resp.get("_json_parse_error"))
+            textual_fallback = str(
+                resp.get("message") or resp.get("content") or resp.get("response") or ""
+            ).strip()
+            if _last_json_err and textual_fallback:
+                # Modelos sin structured output todavía pueden responder bien
+                # en texto libre. Conservar esa respuesta es mejor que ocultarla
+                # tras tres reintentos de formato idénticos.
+                resp = dict(resp)
+                resp["task_complete"] = True
+                resp["commands"] = []
+                emit({"type": "status", "content": "Respuesta textual recibida (modo compatible)."})
+                _last_json_err = False
             if _last_json_err:
                 _json_err_count += 1
                 if _json_err_count >= 3:
@@ -866,6 +1039,16 @@ def _process_chat_turn(
             fetch_target = resp.get("fetch_url", "")
             open_browser = resp.get("open_browser", "")
             json_err = bool(resp.get("_json_parse_error"))
+            if research_turn:
+                # Web evidence is untrusted. Research-only turns may cite it,
+                # but never execute commands, fetch requests or browser actions
+                # proposed by the model/page content.
+                commands = []
+                task_done = True
+                risk = "low"
+                phase = "report"
+                fetch_target = ""
+                open_browser = ""
             if thinking and not json_err:
                 emit({"type": "thinking", "content": thinking, "phase": phase, "risk": risk})
             if message and not json_err:
@@ -1610,10 +1793,28 @@ def api_chat_history(proj_id: str, sess_name: str):
     project_dir = OUT_DIR / proj_id
     conv, model, _ = load_session_in_project(sess_name, project_dir)
     if conv is None:
-        return jsonify({"messages": [], "model": None})
+        return jsonify({"messages": [], "model": None, "research_mode": False})
     # Return only user/assistant messages (not system)
     messages = [m for m in conv if m["role"] != "system"]
-    return jsonify({"messages": messages, "model": model})
+    return jsonify({
+        "messages": messages, "model": model,
+        "research_mode": bool(database.get_session_setting(sess_name, "research_mode", False)),
+    })
+
+
+@app.route("/api/projects/<proj_id>/sessions/<sess_name>/research-mode", methods=["GET", "PUT"])
+def api_research_mode(proj_id: str, sess_name: str):
+    current = database.get_session(sess_name)
+    if not current or current.get("project_id") != proj_id:
+        return jsonify({"error": "session not found"}), 404
+    if request.method == "PUT":
+        data = request.json or {}
+        enabled = bool(data.get("enabled", False))
+        database.set_session_setting(sess_name, "research_mode", enabled)
+        return jsonify({"enabled": enabled})
+    return jsonify({
+        "enabled": bool(database.get_session_setting(sess_name, "research_mode", False)),
+    })
 
 
 @app.route("/api/projects/<proj_id>/sessions/<sess_name>/events", methods=["GET"])
@@ -1896,9 +2097,38 @@ def api_upload(proj_id: str, sess_name: str):
 def api_models():
     import agent as _ag
     backend = _ag.LLM_BACKEND
+    if backend == "auto":
+        catalog = get_model_catalog()
+        route = select_llm_route("tarea general del agente") if catalog else {}
+        ranked = route.get("candidates", [])[:40]
+        return jsonify({
+            "available": bool(catalog),
+            "backend": "auto",
+            "backend_name": "Auto IA",
+            "fast_mode": True,
+            "router": {
+                "policy": route.get("policy", os.environ.get("HACKERAGENT_ROUTER_POLICY", "balanced")),
+                "default_route": route.get("choice"),
+                "reason": route.get("reason", ""),
+                "providers": len({item["backend"] for item in catalog}),
+            },
+            "models": ([{
+                "name": "auto", "label": "✨ Automático (recomendado)",
+                "stars": 5, "desc": "elige modelo por tarea y aplica fallback",
+            }] if catalog else []) + [{
+                "name": f"{item['backend']}::{item['model']}",
+                "label": f"{item['backend_name']} · {item['model']}",
+                "stars": score_model(item["model"])[0],
+                "desc": f"fijar preferencia · {item['quality_desc']}",
+            } for item in ranked],
+        })
     ok, models = check_backend()
     if not ok:
-        return jsonify({"available": False, "models": [], "backend": backend})
+        diagnostic = lmstudio_diagnostics() if backend == "lmstudio" else None
+        return jsonify({
+            "available": False, "models": [], "backend": backend,
+            "backend_name": _backend_display_name(), "diagnostic": diagnostic,
+        })
     ranked = sorted(models, key=lambda m: score_model(m)[0], reverse=True)
     return jsonify({
         "available": True,
@@ -1914,12 +2144,46 @@ def api_models():
 def api_backends():
     """Lista los backends disponibles con su estado online/offline."""
     import agent as _ag
-    ollama_ok, ollama_models     = check_ollama()
-    lmstudio_ok, lmstudio_models = check_lmstudio()
-    deepseek_ok, deepseek_models = check_deepseek()
+    global _BACKEND_REFRESHING
+    cached = _ag._CATALOG_CACHE.get("value")
+    catalog = [dict(item) for item in cached] if cached is not None else get_model_catalog()
+
+    # Stale-while-revalidate: los chips aparecen inmediatamente aunque un
+    # proveedor cloud tarde varios segundos en responder.
+    cache_age = time.time() - float(_ag._CATALOG_CACHE.get("ts", 0))
+    if cached is not None and cache_age > 20:
+        def _refresh_backends():
+            global _BACKEND_REFRESHING
+            try:
+                get_model_catalog(force=True)
+            finally:
+                with _BACKEND_REFRESH_LOCK:
+                    _BACKEND_REFRESHING = False
+
+        with _BACKEND_REFRESH_LOCK:
+            if not _BACKEND_REFRESHING:
+                _BACKEND_REFRESHING = True
+                threading.Thread(target=_refresh_backends, daemon=True).start()
+    grouped = {
+        backend: [item["model"] for item in catalog if item["backend"] == backend]
+        for backend in ("ollama", "lmstudio", "deepseek", "openrouter")
+    }
+    ollama_models, lmstudio_models = grouped["ollama"], grouped["lmstudio"]
+    deepseek_models, openrouter_models = grouped["deepseek"], grouped["openrouter"]
+    ollama_ok, lmstudio_ok = bool(ollama_models), bool(lmstudio_models)
+    deepseek_ok, openrouter_ok = bool(deepseek_models), bool(openrouter_models)
+    all_count = sum(map(len, (ollama_models, lmstudio_models, deepseek_models, openrouter_models)))
     return jsonify({
         "active": _ag.LLM_BACKEND,
         "backends": [
+            {
+                "id": "auto",
+                "name": "Auto IA",
+                "icon": "✨",
+                "url": "router://multi-ia",
+                "online": all_count > 0,
+                "model_count": all_count,
+            },
             {
                 "id": "ollama",
                 "name": "Ollama",
@@ -1944,6 +2208,14 @@ def api_backends():
                 "online": deepseek_ok,
                 "model_count": len(deepseek_models),
             },
+            {
+                "id": "openrouter",
+                "name": "OpenRouter",
+                "icon": "🔀",
+                "url": OPENROUTER_API_URL,
+                "online": openrouter_ok,
+                "model_count": len(openrouter_models),
+            },
         ]
     })
 
@@ -1954,24 +2226,110 @@ def api_switch_backend():
     import agent as _ag
     data = request.json or {}
     new_backend = data.get("backend", "").strip().lower()
-    if new_backend not in ("ollama", "lmstudio", "deepseek"):
-        return jsonify({"error": "backend must be 'ollama', 'lmstudio' or 'deepseek'"}), 400
+    if new_backend not in ("auto", "ollama", "lmstudio", "deepseek", "openrouter"):
+        return jsonify({"error": "backend must be auto, ollama, lmstudio, deepseek or openrouter"}), 400
     _ag.LLM_BACKEND = new_backend
     os.environ["HACKERAGENT_LLM_BACKEND"] = new_backend
-    if new_backend == "deepseek":
+    _ag._CATALOG_CACHE.update(ts=0.0, value=None)
+    if new_backend in ("auto", "deepseek"):
         os.environ["HACKERAGENT_FAST_MODE"] = "1"
     else:
         os.environ.pop("HACKERAGENT_FAST_MODE", None)
     # Return the models for the new backend
     ok, models = check_backend()
-    ranked = sorted(models, key=lambda m: score_model(m)[0], reverse=True) if ok else []
+    if new_backend == "auto":
+        route = select_llm_route("tarea general del agente") if ok else {}
+        ranked_items = route.get("candidates", [])[:40]
+        model_payload = ([{
+            "name": "auto", "label": "✨ Automático (recomendado)",
+            "stars": 5, "desc": "elige modelo por tarea y aplica fallback",
+        }] if ok else []) + [{
+            "name": f"{item['backend']}::{item['model']}",
+            "label": f"{item['backend_name']} · {item['model']}",
+            "stars": score_model(item["model"])[0], "desc": item["quality_desc"],
+        } for item in ranked_items]
+    else:
+        ranked = sorted(models, key=lambda m: score_model(m)[0], reverse=True) if ok else []
+        model_payload = [
+            {"name": m, "label": m, "stars": score_model(m)[0], "desc": score_model(m)[1]}
+            for m in ranked
+        ]
     return jsonify({
         "backend":      new_backend,
         "backend_name": _ag.LLM_BACKEND and _backend_display_name(),
         "available":    ok,
-        "models":       [{"name": m, "stars": score_model(m)[0], "desc": score_model(m)[1]}
-                         for m in ranked],
+        "models":       model_payload,
     })
+
+
+@app.route("/api/lmstudio/status", methods=["GET"])
+def api_lmstudio_status():
+    """Diagnóstico rico de LM Studio para la tarjeta de configuración."""
+    force = request.args.get("force", "").lower() in {"1", "true", "yes"}
+    result = lmstudio_diagnostics(force=force)
+    return jsonify(result), (200 if result.get("online") else 503)
+
+
+@app.route("/api/lmstudio/test", methods=["POST"])
+def api_lmstudio_test():
+    """Comprueba conectividad y, opcionalmente, una inferencia mínima real."""
+    from lmstudio_client import LMStudioError, lmstudio_chat_text
+
+    data = request.json or {}
+    diagnostic = lmstudio_diagnostics()
+    if not diagnostic.get("online"):
+        return jsonify(diagnostic), 503
+    if data.get("deep", True) is False:
+        return jsonify({**diagnostic, "inference_ok": None})
+    inventory = diagnostic.get("models") or []
+    requested = str(data.get("model") or "").strip()
+    if "::" in requested:
+        provider, requested_model = requested.split("::", 1)
+        requested = requested_model if provider == "lmstudio" else ""
+    model = requested if any(item.get("id") == requested for item in inventory) else ""
+    if not model:
+        loaded = next((item for item in inventory if item.get("loaded") is True), None)
+        model = (loaded or (inventory[0] if inventory else {})).get("id", "")
+    if not model:
+        return jsonify({**diagnostic, "inference_ok": False,
+                        "error": "No hay un modelo de chat disponible para probar."}), 409
+    started = time.perf_counter()
+    try:
+        answer = lmstudio_chat_text(
+            model,
+            [{"role": "user", "content": "Responde exactamente: OK"}],
+            temperature=0, max_tokens=12, timeout=60,
+        )
+    except LMStudioError as exc:
+        return jsonify({
+            **diagnostic, "inference_ok": False, "model_tested": model,
+            "error": str(exc), "hint": exc.hint,
+        }), 502
+    return jsonify({
+        **diagnostic, "inference_ok": True, "model_tested": model,
+        "inference_ms": round((time.perf_counter() - started) * 1000),
+        "response_preview": answer[:120],
+    })
+
+
+@app.route("/api/router/policy", methods=["GET", "POST"])
+def api_router_policy():
+    """Consulta o cambia la prioridad del router sin reiniciar el servidor."""
+    allowed = {
+        "balanced": "Equilibrio entre calidad, latencia y ejecución local",
+        "quality": "Prioriza el modelo con mayor capacidad",
+        "local": "Prioriza Ollama/LM Studio y privacidad",
+        "cost": "Prioriza modelos locales o económicos",
+    }
+    if request.method == "POST":
+        policy = str((request.json or {}).get("policy", "")).lower().strip()
+        if policy not in allowed:
+            return jsonify({"error": f"policy must be one of: {', '.join(allowed)}"}), 400
+        os.environ["HACKERAGENT_ROUTER_POLICY"] = policy
+    current = os.environ.get("HACKERAGENT_ROUTER_POLICY", "balanced").lower()
+    if current not in allowed:
+        current = "balanced"
+    return jsonify({"policy": current, "policies": allowed})
 
 
 @app.route("/api/projects/<proj_id>/report", methods=["POST"])
@@ -2029,16 +2387,12 @@ def api_tools_install():
 
 @app.route("/api/tools/install-all", methods=["POST"])
 def api_tools_install_all():
-    """Install all missing tools (non-interactive)."""
+    """Install Python requirements and all missing tools (non-interactive)."""
     try:
-        from tool_manager import install_missing_tools
-        results = install_missing_tools(interactive=False)
-        return jsonify({
-            "installed": {k: v for k, v in results.items() if v},
-            "failed": {k: v for k, v in results.items() if not v},
-        })
+        from tool_manager import install_all_dependencies
+        return jsonify(install_all_dependencies())
     except Exception as e:
-        return jsonify({"error": str(e)})
+        return jsonify({"error": str(e), "success": False}), 500
 
 
 @app.route("/api/tools/update", methods=["POST"])
@@ -2085,27 +2439,27 @@ def launch(host: str = "0.0.0.0", port: int = 7860, debug: bool = False, verbose
 
     _ag.VERBOSE = verbose
 
-    # Auto-detect backend
-    ollama_ok, ollama_models     = check_ollama()
-    lmstudio_ok, lmstudio_models = check_lmstudio()
-    deepseek_ok, deepseek_models = check_deepseek()
+    # Inventario paralelo compartido por el router y la UI.
+    catalog = get_model_catalog(force=True)
+    grouped = {
+        backend: [item["model"] for item in catalog if item["backend"] == backend]
+        for backend in ("ollama", "lmstudio", "deepseek", "openrouter")
+    }
+    ollama_models, lmstudio_models = grouped["ollama"], grouped["lmstudio"]
+    deepseek_models, openrouter_models = grouped["deepseek"], grouped["openrouter"]
+    ollama_ok, lmstudio_ok = bool(ollama_models), bool(lmstudio_models)
+    deepseek_ok, openrouter_ok = bool(deepseek_models), bool(openrouter_models)
 
-    # Prioridad: si ya se fijó desde CLI (--deepseek), no cambiar
-    if _ag.LLM_BACKEND not in ("deepseek",):
-        if ollama_ok and not lmstudio_ok and not deepseek_ok:
-            _ag.LLM_BACKEND = "ollama"
-        elif lmstudio_ok and not ollama_ok and not deepseek_ok:
-            _ag.LLM_BACKEND = "lmstudio"
-        elif deepseek_ok and not ollama_ok and not lmstudio_ok:
-            _ag.LLM_BACKEND = "deepseek"
-        elif ollama_ok:
-            _ag.LLM_BACKEND = "ollama"
-        elif deepseek_ok:
-            _ag.LLM_BACKEND = "deepseek"
+    # Respetar siempre la elección explícita. Antes, arrancar la Web UI podía
+    # cambiar silenciosamente de LM Studio a Ollama si ambos respondían.
+    if _ag.LLM_BACKEND not in {"auto", "ollama", "lmstudio", "deepseek", "openrouter"}:
+        _ag.LLM_BACKEND = "lmstudio"
 
     os.environ["HACKERAGENT_LLM_BACKEND"] = _ag.LLM_BACKEND
-    if _ag.LLM_BACKEND == "deepseek":
+    if _ag.LLM_BACKEND in ("auto", "deepseek"):
         os.environ["HACKERAGENT_FAST_MODE"] = "1"
+    else:
+        os.environ.pop("HACKERAGENT_FAST_MODE", None)
 
     backend_name = _backend_display_name()
     ok, models = check_backend()
