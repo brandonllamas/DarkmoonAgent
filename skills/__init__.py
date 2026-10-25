@@ -19,12 +19,14 @@ CATEGORY_LABELS = {
     "ataque":       "💥 ATAQUE / EXPLOTACIÓN",
     "movil":        "📱 PENTESTING MÓVIL / APK",
     "desarrollo":   "🛠  DESARROLLO DE CÓDIGO / MALWARE",
+    "metodologia":  "🧭 METODOLOGÍA PTES / REPORTING",
     "otros":        "⚙  OTROS",
 }
 
 CATEGORY_ORDER = [
     "recon_pasivo", "recon_activo", "osint", "vuln_scan",
-    "analisis", "ing_inversa", "ataque", "movil", "desarrollo", "otros",
+    "analisis", "ing_inversa", "ataque", "movil", "desarrollo",
+    "metodologia", "otros",
 ]
 
 
