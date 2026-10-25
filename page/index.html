@@ -1445,6 +1445,59 @@ body::after{
 @keyframes orb-c{to{transform:translate3d(8vw,-4vh,0) scale(1.08);opacity:.7}}
 @keyframes beam-cross{0%,14%{transform:translate3d(0,0,0) skewX(-18deg);opacity:0}22%{opacity:.13}48%,100%{transform:translate3d(190vw,0,0) skewX(-18deg);opacity:0}}
 
+/* ── HACKING AMBIANCE: matrix rain + CRT ──────────────── */
+#matrix-rain{
+  position:absolute;inset:0;width:100%;height:100%;
+  opacity:.10;mix-blend-mode:screen;pointer-events:none;
+}
+/* Horizontal scan sweep that reads like a terminal refresh */
+#scan-beam{
+  position:absolute;left:0;right:0;top:0;height:140px;pointer-events:none;
+  background:linear-gradient(180deg,transparent,rgba(61,186,111,.10) 45%,rgba(123,108,246,.08) 55%,transparent);
+  filter:blur(2px);opacity:.55;
+  animation:scan-sweep 7.5s cubic-bezier(.65,0,.35,1) infinite;
+}
+@keyframes scan-sweep{0%{transform:translateY(-160px);opacity:0}8%{opacity:.6}92%{opacity:.6}100%{transform:translateY(100vh);opacity:0}}
+/* CRT static scanlines across the whole viewport */
+#crt-scanlines{
+  position:fixed;inset:0;z-index:40;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0px,rgba(0,0,0,.16) 1px,transparent 2px,transparent 3px);
+  mix-blend-mode:multiply;opacity:.5;
+}
+/* Very subtle CRT luminance flicker */
+#crt-flicker{
+  position:fixed;inset:0;z-index:41;pointer-events:none;
+  background:rgba(123,255,170,.012);
+  animation:crt-flicker 5.5s steps(1) infinite;
+}
+@keyframes crt-flicker{0%,97%,100%{opacity:0}97.5%{opacity:.5}98.5%{opacity:0}99%{opacity:.35}}
+
+/* Logo glitch — periodic RGB-split flutter */
+.logo-text em{position:relative;animation:logo-glitch 6s infinite}
+@keyframes logo-glitch{
+  0%,92%,100%{text-shadow:none;opacity:1}
+  93%{text-shadow:-1.5px 0 var(--red),1.5px 0 var(--green);opacity:.85}
+  94%{text-shadow:1.5px 0 var(--accent),-1.5px 0 var(--green);transform:translateX(1px)}
+  95%{text-shadow:-1px 0 var(--red),1px 0 var(--accent);transform:translateX(-1px)}
+  96%{text-shadow:none;transform:none}
+}
+.logo-mark{position:relative;overflow:hidden}
+.logo-mark::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.28) 0,rgba(0,0,0,.28) 1px,transparent 1px,transparent 3px);
+  opacity:.5;mix-blend-mode:multiply;
+}
+/* Live terminal prompt + blinking caret in the context header */
+#ctx-proj::before{content:'❯ ';color:var(--green);font-family:'JetBrains Mono',monospace;}
+#ctx-proj::after{
+  content:'';display:inline-block;width:8px;height:1.05em;margin-left:3px;
+  vertical-align:text-bottom;background:var(--green);box-shadow:0 0 6px var(--green);
+  animation:caret-blink 1.1s steps(1) infinite;
+}
+@keyframes caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+/* Online badge gets a terminal-green data pulse */
+#ollama-badge{font-family:'JetBrains Mono',monospace;}
+
 /* Layered glass surfaces and pointer-following light. */
 #main{position:relative;background:linear-gradient(145deg,rgba(10,13,20,.55),rgba(13,16,24,.2) 55%,rgba(9,12,18,.5))}
 #main::before{
@@ -1607,7 +1660,7 @@ body.ui-ready .suggestion-chip{animation:suggestion-in .55s var(--ease-out-quint
   body.ui-ready #right-panel{animation:none}
 }
 @media(prefers-reduced-motion:reduce){
-  .ambient-orb,.ambient-beam,.logo-mark::after,.empty-icon::before,.empty-icon::after,.lmstudio-card::before,
+  .ambient-orb,.ambient-beam,#scan-beam,#crt-flicker,.logo-text em,#ctx-proj::after,.logo-mark::after,.empty-icon::before,.empty-icon::after,.lmstudio-card::before,
   .dependency-block.running .dependency-glyph,.dependency-block.running .dependency-fill::after,
   body.ui-ready #sidebar,body.ui-ready #topbar,body.ui-ready #right-panel,body.ui-ready .empty-icon,
   body.ui-ready #empty-state .empty-title,body.ui-ready #empty-state .empty-sub,body.ui-ready #empty-state .empty-hint,
@@ -1620,11 +1673,15 @@ body.ui-ready .suggestion-chip{animation:suggestion-in .55s var(--ease-out-quint
 <body>
 
 <div id="ambient" aria-hidden="true">
+  <canvas id="matrix-rain"></canvas>
   <span class="ambient-orb orb-a"></span>
   <span class="ambient-orb orb-b"></span>
   <span class="ambient-orb orb-c"></span>
   <span class="ambient-beam"></span>
+  <div id="scan-beam"></div>
 </div>
+<div id="crt-scanlines" aria-hidden="true"></div>
+<div id="crt-flicker" aria-hidden="true"></div>
 
 <div id="app">
 
@@ -1643,6 +1700,18 @@ body.ui-ready .suggestion-chip{animation:suggestion-in .55s var(--ease-out-quint
   </div>
 
   <div id="proj-list"></div>
+
+  <!-- PERFIL / CONFIG -->
+  <div id="sb-profile">
+    <div class="profile-chip" title="Operador local">
+      <span class="profile-avatar">◎</span>
+      <span class="profile-meta hide-collapsed">
+        <strong>Operador</strong>
+        <small id="profile-backend">—</small>
+      </span>
+    </div>
+    <button id="btn-config" class="profile-gear" onclick="openConfig()" title="Configuración de IA" aria-label="Configuración">⚙</button>
+  </div>
 </aside>
 
 <!-- ══ MAIN ══ -->
@@ -1870,6 +1939,155 @@ body.ui-ready .suggestion-chip{animation:suggestion-in .55s var(--ease-out-quint
   <div id="skills-panel"></div>
 </aside>
 
+</div>
+
+<!-- ══ CONFIG VIEW (perfil → ⚙) ══ -->
+<style>
+/* Perfil en el sidebar */
+#sb-profile{display:flex;align-items:center;gap:8px;padding:10px 12px;border-top:1px solid var(--border);flex-shrink:0;background:linear-gradient(0deg,rgba(123,108,246,.04),transparent);}
+.profile-chip{display:flex;align-items:center;gap:9px;flex:1;min-width:0;}
+.profile-avatar{width:30px;height:30px;border-radius:9px;flex-shrink:0;display:grid;place-items:center;font-size:15px;
+  background:linear-gradient(135deg,var(--green-low),rgba(123,108,246,.1));border:1px solid var(--border2);color:var(--green);box-shadow:0 0 12px var(--green-low);}
+.profile-meta{display:flex;flex-direction:column;min-width:0;line-height:1.25;}
+.profile-meta strong{font-size:12px;color:var(--text2);}
+.profile-meta small{font-size:9.5px;color:var(--text4);font-family:'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.profile-gear{width:32px;height:32px;flex-shrink:0;border-radius:8px;border:1px solid var(--border2);background:var(--bg3);
+  color:var(--text3);cursor:pointer;font-size:15px;transition:var(--tr);}
+.profile-gear:hover{background:var(--accent-low);border-color:var(--accent);color:var(--accent2);transform:rotate(35deg);box-shadow:0 0 16px var(--accent-low);}
+#sidebar.collapsed #sb-profile{justify-content:center;flex-wrap:wrap;}
+
+/* Overlay + panel */
+#config-overlay{position:fixed;inset:0;z-index:120;display:none;align-items:stretch;justify-content:center;
+  background:rgba(5,7,12,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}
+#config-overlay.show{display:flex;animation:cfg-fade .2s ease;}
+@keyframes cfg-fade{from{opacity:0}to{opacity:1}}
+#config-view{width:min(1080px,100%);height:100%;display:flex;flex-direction:column;background:var(--bg);
+  border-left:1px solid var(--border2);border-right:1px solid var(--border2);box-shadow:0 0 80px rgba(0,0,0,.6);position:relative;overflow:hidden;}
+#config-overlay.show #config-view{animation:cfg-rise .32s cubic-bezier(.22,1,.36,1);}
+@keyframes cfg-rise{from{transform:translateY(14px);opacity:0}to{transform:none;opacity:1}}
+#config-view::before{content:'';position:absolute;left:0;right:0;top:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--green),var(--accent),transparent);opacity:.6;}
+.cfg-top{display:flex;align-items:center;gap:14px;padding:18px 24px;border-bottom:1px solid var(--border);flex-shrink:0;
+  background:linear-gradient(180deg,rgba(123,108,246,.05),transparent);}
+.cfg-top-mark{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;font-size:20px;flex-shrink:0;
+  background:linear-gradient(135deg,var(--accent),#5a4ed4);box-shadow:0 0 22px var(--accent-glow);}
+.cfg-top-title{display:flex;align-items:center;gap:13px;flex:1;min-width:0;}
+.cfg-top h2{font-size:17px;font-weight:700;letter-spacing:.2px;}
+.cfg-top p{font-size:11.5px;color:var(--text3);margin-top:1px;font-family:'JetBrains Mono',monospace;}
+.cfg-close{width:36px;height:36px;border-radius:9px;border:1px solid var(--border2);background:var(--bg3);color:var(--text3);
+  cursor:pointer;font-size:15px;transition:var(--tr);flex-shrink:0;}
+.cfg-close:hover{background:var(--red-low);border-color:var(--red);color:var(--red);}
+.cfg-scroll{flex:1;overflow-y:auto;padding:22px 24px 40px;}
+
+.cfg-section{max-width:900px;margin:0 auto 30px;}
+.cfg-sec-head{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.cfg-step{width:26px;height:26px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:12px;font-weight:700;
+  font-family:'JetBrains Mono',monospace;color:var(--green);background:var(--green-low);border:1px solid rgba(61,186,111,.3);}
+.cfg-sec-head h3{font-size:14.5px;font-weight:700;}
+.cfg-sec-head p{font-size:11.5px;color:var(--text3);margin-top:1px;}
+
+.cfg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;}
+.cfg-card{border:1px solid var(--border2);border-radius:13px;background:var(--bg2);padding:14px;position:relative;
+  transition:var(--tr);display:flex;flex-direction:column;gap:10px;overflow:hidden;}
+.cfg-card:hover{border-color:var(--border3);}
+.cfg-card.active{border-color:rgba(123,108,246,.6);box-shadow:0 0 0 1px var(--accent-low),0 14px 36px rgba(0,0,0,.3);
+  background:linear-gradient(180deg,var(--accent-low),var(--bg2) 60%);}
+.cfg-card.disabled{opacity:.52;}
+.cfg-card.auto{background:linear-gradient(135deg,rgba(123,108,246,.1),rgba(61,186,111,.05));}
+.cfg-card-head{display:flex;align-items:center;gap:10px;}
+.cfg-card-icon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:17px;flex-shrink:0;
+  background:var(--bg4);border:1px solid var(--border2);}
+.cfg-card-name{flex:1;min-width:0;}
+.cfg-card-name strong{font-size:13.5px;display:block;}
+.cfg-kind{font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--text4);text-transform:uppercase;letter-spacing:.4px;}
+.cfg-pill{font-size:9px;font-weight:700;padding:3px 8px;border-radius:20px;font-family:'JetBrains Mono',monospace;
+  text-transform:uppercase;letter-spacing:.3px;flex-shrink:0;}
+.cfg-pill.on{background:var(--green-low);color:var(--green);border:1px solid rgba(61,186,111,.3);}
+.cfg-pill.off{background:var(--red-low);color:var(--red);border:1px solid rgba(224,82,82,.25);}
+.cfg-pill.dis{background:var(--bg4);color:var(--text4);border:1px solid var(--border2);}
+.cfg-card-sub{font-size:10.5px;color:var(--text3);line-height:1.5;}
+.cfg-row{display:flex;align-items:center;gap:8px;}
+.cfg-field{display:flex;flex-direction:column;gap:4px;}
+.cfg-field label{font-size:10px;color:var(--text3);font-family:'JetBrains Mono',monospace;}
+.cfg-input,.cfg-select{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;padding:7px 10px;
+  color:var(--text);font-size:12px;font-family:'JetBrains Mono',monospace;outline:none;transition:var(--tr);}
+.cfg-input:focus,.cfg-select:focus{border-color:var(--accent);background:var(--bg4);}
+.cfg-input::placeholder{color:var(--text4);}
+.cfg-btn{border:1px solid var(--border2);background:var(--bg3);color:var(--text2);border-radius:8px;padding:7px 12px;
+  font-size:11.5px;font-weight:600;cursor:pointer;transition:var(--tr);font-family:'Inter',sans-serif;white-space:nowrap;}
+.cfg-btn:hover{background:var(--bg4);border-color:var(--border3);color:var(--text);}
+.cfg-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+.cfg-btn.primary:hover{background:#9080f8;box-shadow:0 4px 16px var(--accent-glow);}
+.cfg-btn.ok{background:var(--green);border-color:var(--green);color:#06230f;}
+.cfg-btn:disabled{opacity:.5;cursor:not-allowed;}
+.cfg-btn.ghost{background:transparent;}
+.cfg-switch{width:38px;height:21px;border:1px solid var(--border3);border-radius:12px;background:var(--border2);position:relative;
+  flex-shrink:0;cursor:pointer;transition:var(--tr);}
+.cfg-switch::after{content:'';position:absolute;width:15px;height:15px;left:2px;top:2px;border-radius:50%;background:var(--text3);
+  transition:all .24s cubic-bezier(.34,1.56,.64,1);}
+.cfg-switch.on{background:var(--green-low);border-color:rgba(61,186,111,.6);}
+.cfg-switch.on::after{background:var(--green);box-shadow:0 0 10px var(--green);transform:translateX(17px);}
+.cfg-config-toggle{font-size:10.5px;color:var(--accent2);cursor:pointer;background:none;border:none;padding:2px 0;text-align:left;
+  font-family:'JetBrains Mono',monospace;}
+.cfg-config-toggle:hover{text-decoration:underline;}
+.cfg-advanced{display:none;flex-direction:column;gap:9px;padding-top:4px;border-top:1px dashed var(--border2);margin-top:2px;}
+.cfg-advanced.open{display:flex;}
+.cfg-getkey{font-size:10px;color:var(--text4);text-decoration:none;}
+.cfg-getkey:hover{color:var(--accent2);}
+.cfg-keyrow{display:flex;gap:6px;}
+.cfg-keyrow .cfg-input{flex:1;}
+
+.cfg-policies{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;}
+.cfg-policy{border:1px solid var(--border2);border-radius:11px;background:var(--bg2);padding:12px;cursor:pointer;transition:var(--tr);}
+.cfg-policy:hover{border-color:var(--border3);}
+.cfg-policy.active{border-color:rgba(61,186,111,.55);background:linear-gradient(180deg,var(--green-low),var(--bg2) 70%);box-shadow:0 0 0 1px var(--green-low);}
+.cfg-policy strong{font-size:12.5px;display:block;margin-bottom:3px;}
+.cfg-policy small{font-size:10.5px;color:var(--text3);line-height:1.45;}
+.cfg-research-toggle{display:flex;align-items:center;gap:12px;border:1px solid var(--border2);border-radius:12px;padding:13px 15px;
+  background:linear-gradient(135deg,rgba(91,138,240,.06),var(--bg2));margin-bottom:12px;cursor:pointer;}
+.cfg-research-toggle .ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:16px;flex-shrink:0;
+  background:rgba(91,138,240,.12);color:#8db0ff;}
+.cfg-research-toggle .tx{flex:1;}.cfg-research-toggle .tx strong{font-size:13px;display:block;}
+.cfg-research-toggle .tx small{font-size:11px;color:var(--text3);}
+@media(max-width:720px){#config-view{border:none;}.cfg-scroll{padding:16px;}}
+@media(prefers-reduced-motion:reduce){#config-overlay.show,#config-overlay.show #config-view{animation:none}.profile-gear:hover{transform:none}}
+</style>
+<div id="config-overlay" aria-hidden="true">
+  <div id="config-view" role="dialog" aria-label="Configuración de IA" aria-modal="true">
+    <header class="cfg-top">
+      <div class="cfg-top-title">
+        <span class="cfg-top-mark">⚙</span>
+        <div><h2>Centro de Configuración</h2><p>Elige y conecta tu motor de IA</p></div>
+      </div>
+      <button class="cfg-close" onclick="closeConfig()" title="Cerrar (Esc)">✕</button>
+    </header>
+    <div class="cfg-scroll">
+      <section class="cfg-section">
+        <div class="cfg-sec-head"><span class="cfg-step">1</span>
+          <div><h3>Motor de IA</h3><p>Activa los que uses, conéctalos y elige cuál responde.</p></div>
+        </div>
+        <div id="cfg-providers" class="cfg-grid"><p style="color:var(--text4);font-size:12px;">Cargando…</p></div>
+      </section>
+      <section class="cfg-section">
+        <div class="cfg-sec-head"><span class="cfg-step">2</span>
+          <div><h3>Prioridad de Auto IA</h3><p>Cómo elige el modelo cuando el backend activo es “Auto”.</p></div>
+        </div>
+        <div id="cfg-policies" class="cfg-policies"></div>
+      </section>
+      <section class="cfg-section">
+        <div class="cfg-sec-head"><span class="cfg-step">3</span>
+          <div><h3>Búsqueda en internet</h3><p>Deja que el agente investigue fuentes públicas antes de responder.</p></div>
+        </div>
+        <div class="cfg-research-toggle" onclick="cfgToggleResearch()" role="switch" tabindex="0"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();cfgToggleResearch()}">
+          <span class="ic">⌕</span>
+          <span class="tx"><strong>Activar búsqueda por defecto</strong><small id="cfg-research-state">Las sesiones nuevas investigarán automáticamente.</small></span>
+          <span class="cfg-switch" id="cfg-research-switch"></span>
+        </div>
+        <div id="cfg-search" class="cfg-grid"></div>
+      </section>
+    </div>
+  </div>
 </div>
 
 <!-- MODAL -->
@@ -2168,6 +2386,8 @@ async function loadBackends(){
     box.innerHTML=(data.backends||[]).map(b=>`<button class="backend-chip ${b.id===data.active?'active':''} ${b.online?'':'offline'}"
       onclick="switchBackend('${b.id}')" title="${esc(b.name)} · ${b.online?`${b.model_count} modelo(s)`:'sin conexión'}">
       ${b.icon} ${esc(b.name.replace(' API',''))}</button>`).join('');
+    const pb=document.getElementById('profile-backend');
+    if(pb){const a=(data.backends||[]).find(b=>b.id===data.active);pb.textContent=a?a.name.replace(' API',''):(data.active||'—');}
   }catch(e){console.error('backends:',e);}
 }
 async function switchBackend(backend){
@@ -3961,11 +4181,234 @@ function toast(msg,type='info'){
 }
 
 /* ═══════════════════════════════════════════
+   CONFIG VIEW (perfil → ⚙)
+═══════════════════════════════════════════ */
+S.cfgOpen = S.cfgOpen || new Set();
+const _POL_LABEL = {balanced:'⚖ Equilibrado',quality:'◆ Máxima calidad',local:'⌂ Local / privado',cost:'$ Menor costo'};
+
+async function openConfig(){
+  document.getElementById('config-overlay').classList.add('show');
+  await loadConfig();
+}
+function closeConfig(){document.getElementById('config-overlay').classList.remove('show');}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){const o=document.getElementById('config-overlay');if(o&&o.classList.contains('show'))closeConfig();}
+});
+document.getElementById('config-overlay').addEventListener('click',function(e){if(e.target===this)closeConfig();});
+
+function _setProfileBackend(d){
+  const pb=document.getElementById('profile-backend');if(!pb||!d)return;
+  pb.textContent=d.active==='auto'?'Auto IA':((d.providers||[]).find(p=>p.id===d.active)?.name||d.active||'—');
+}
+
+async function loadConfig(){
+  try{
+    const d=await(await fetch('/api/config')).json();
+    S.cfg=d; renderConfig(); _setProfileBackend(d);
+  }catch(e){
+    document.getElementById('cfg-providers').innerHTML='<p style="color:var(--red);font-size:12px">No se pudo cargar la configuración.</p>';
+  }
+}
+
+async function cfgPost(body){
+  const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json(); if(!r.ok)throw new Error(d.error||'No se pudo guardar');
+  S.cfg=d; renderConfig(); _setProfileBackend(d);
+  try{loadBackends();loadModels();loadRouterPolicy();}catch(_){}
+  return d;
+}
+
+function renderConfig(){
+  const c=S.cfg; if(!c)return;
+  const anyOnline=(c.providers||[]).some(p=>p.enabled&&p.online);
+  const autoActive=c.active==='auto';
+  const autoCard=`<div class="cfg-card auto ${autoActive?'active':''}">
+    <div class="cfg-card-head">
+      <span class="cfg-card-icon">✨</span>
+      <div class="cfg-card-name"><strong>Auto IA</strong><span class="cfg-kind">router multi-ia</span></div>
+      ${anyOnline?'<span class="cfg-pill on">● Listo</span>':'<span class="cfg-pill off">Sin motores</span>'}
+    </div>
+    <div class="cfg-card-sub">Combina todos los motores activos y elige el mejor modelo según la tarea, con respaldo automático.</div>
+    <div class="cfg-row"><span style="flex:1"></span>
+      <button class="cfg-btn ${autoActive?'ok':'primary'}" onclick="cfgSetActive('auto')" ${autoActive?'disabled':''}>${autoActive?'✓ En uso':'Usar Auto IA'}</button>
+    </div></div>`;
+  document.getElementById('cfg-providers').innerHTML=autoCard+(c.providers||[]).map(cfgProviderCard).join('');
+  // Políticas
+  document.getElementById('cfg-policies').innerHTML=Object.entries(c.policies||{}).map(([k,v])=>
+    `<div class="cfg-policy ${c.router_policy===k?'active':''}" onclick="cfgSetPolicy('${k}')">
+      <strong>${_POL_LABEL[k]||k}</strong><small>${esc(v)}</small></div>`).join('');
+  // Búsqueda
+  document.getElementById('cfg-search').innerHTML=(c.search||[]).map(cfgSearchCard).join('');
+  const rs=document.getElementById('cfg-research-switch'); if(rs)rs.classList.toggle('on',!!c.research_default);
+  const rst=document.getElementById('cfg-research-state');
+  if(rst)rst.textContent=c.research_default?'Activado · las sesiones nuevas investigarán automáticamente.':'Desactivado · actívalo para investigar sin pedirlo cada vez.';
+  // Reabrir secciones avanzadas que estaban abiertas
+  S.cfgOpen.forEach(id=>{const el=document.getElementById('cfg-adv-'+id);if(el)el.classList.add('open');});
+}
+
+function cfgProviderCard(p){
+  const active=S.cfg.active===p.id;
+  const pill=!p.enabled?'<span class="cfg-pill dis">Desactivado</span>'
+    :p.online?`<span class="cfg-pill on">● Online · ${p.model_count}</span>`
+    :'<span class="cfg-pill off">Offline</span>';
+  const models=(p.online&&p.models.length)?`<div class="cfg-field"><label>Modelo</label>
+    <select class="cfg-select" id="cfg-model-${p.id}">${p.models.map(m=>
+      `<option value="${esc(m.name)}" ${p.model===m.name?'selected':''}>${esc(m.name)}${m.stars?' '+'★'.repeat(m.stars):''}</option>`).join('')}</select></div>`:'';
+  const urlField=p.url_env?`<div class="cfg-field"><label>Endpoint · ${esc(p.url_env)}</label>
+    <input class="cfg-input" id="cfg-url-${p.id}" value="${esc(p.url)}" placeholder="URL del servidor"></div>`:'';
+  const keyField=p.key_env?`<div class="cfg-field"><label>API Key${p.has_key?' · guardada '+esc(p.key_masked):''}</label>
+    <input class="cfg-input" id="cfg-key-${p.id}" type="password" autocomplete="off" placeholder="${p.has_key?'•••• (deja vacío para no cambiar)':'pega tu API key'}">
+    ${p.get_url?`<a class="cfg-getkey" href="${esc(p.get_url)}" target="_blank" rel="noopener">↗ Obtener API key</a>`:''}</div>`:'';
+  return `<div class="cfg-card ${active?'active':''} ${p.enabled?'':'disabled'}" id="cfg-card-${p.id}">
+    <div class="cfg-card-head">
+      <span class="cfg-card-icon">${p.icon}</span>
+      <div class="cfg-card-name"><strong>${esc(p.name)}</strong><span class="cfg-kind">${p.kind==='local'?'local':'nube'}</span></div>
+      ${pill}
+    </div>
+    <div class="cfg-card-sub">${esc(p.hint)}</div>
+    <div class="cfg-row">
+      <span class="cfg-switch ${p.enabled?'on':''}" onclick="cfgToggleEnabled('${p.id}')" role="switch" title="Activar / Desactivar"></span>
+      <span style="font-size:11px;color:var(--text3)">${p.enabled?'Activado':'Desactivado'}</span>
+      <span style="flex:1"></span>
+      <button class="cfg-btn ${active?'ok':'primary'}" onclick="cfgSetActive('${p.id}')" ${active?'disabled':''}>${active?'✓ En uso':'Usar esta IA'}</button>
+    </div>
+    ${models}
+    <button class="cfg-config-toggle" onclick="cfgToggleAdvanced('${p.id}')">⚙ Configurar conexión</button>
+    <div class="cfg-advanced" id="cfg-adv-${p.id}">
+      ${urlField}${keyField}
+      <div class="cfg-row">
+        <button class="cfg-btn primary" onclick="cfgSaveProvider('${p.id}')">Guardar</button>
+        <button class="cfg-btn ghost" onclick="cfgTestProvider('${p.id}')">◆ Probar</button>
+        ${(p.key_env&&p.has_key)?`<button class="cfg-btn ghost" onclick="cfgClearKey('${p.id}')">Borrar key</button>`:''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function cfgSearchCard(s){
+  const pill=s.always_on?'<span class="cfg-pill on">Siempre activo</span>'
+    :s.has_key?'<span class="cfg-pill on">● Conectado</span>':'<span class="cfg-pill dis">Sin key</span>';
+  const body=s.always_on?'':`<div class="cfg-field"><label>API Key${s.has_key?' · '+esc(s.key_masked):''}</label>
+    <input class="cfg-input" id="cfg-skey-${s.id}" type="password" autocomplete="off" placeholder="${s.has_key?'•••• (deja vacío para no cambiar)':'pega tu API key'}">
+    ${s.get_url?`<a class="cfg-getkey" href="${esc(s.get_url)}" target="_blank" rel="noopener">↗ Obtener API key</a>`:''}</div>
+    <div class="cfg-row"><button class="cfg-btn primary" onclick="cfgSaveSearch('${s.id}','${esc(s.key_env)}')">Guardar</button>
+    ${s.has_key?`<button class="cfg-btn ghost" onclick="cfgSaveSearch('${s.id}','${esc(s.key_env)}',true)">Borrar</button>`:''}</div>`;
+  return `<div class="cfg-card">
+    <div class="cfg-card-head"><span class="cfg-card-icon">⌕</span>
+      <div class="cfg-card-name"><strong>${esc(s.name)}</strong><span class="cfg-kind">buscador web</span></div>${pill}</div>
+    <div class="cfg-card-sub">${esc(s.hint)}</div>${body}</div>`;
+}
+
+function cfgToggleAdvanced(id){
+  const el=document.getElementById('cfg-adv-'+id);if(!el)return;
+  const open=el.classList.toggle('open');
+  if(open)S.cfgOpen.add(id);else S.cfgOpen.delete(id);
+}
+function _cfgDisabledSet(){return new Set((S.cfg.providers||[]).filter(p=>!p.enabled).map(p=>p.id));}
+
+async function cfgSetActive(id){
+  try{const dis=_cfgDisabledSet();dis.delete(id);
+    await cfgPost({active:id,disabled:[...dis]});
+    toast(`IA activa: ${id==='auto'?'Auto IA':id}`,'success');
+  }catch(e){toast(e.message,'error');}
+}
+async function cfgToggleEnabled(id){
+  try{const dis=_cfgDisabledSet();dis.has(id)?dis.delete(id):dis.add(id);
+    await cfgPost({disabled:[...dis]});
+  }catch(e){toast(e.message,'error');}
+}
+async function cfgSaveProvider(id){
+  const p=(S.cfg.providers||[]).find(x=>x.id===id);if(!p)return;
+  const env={};
+  const u=document.getElementById('cfg-url-'+id);if(u&&p.url_env)env[p.url_env]=u.value.trim();
+  const k=document.getElementById('cfg-key-'+id);if(k&&k.value.trim()&&p.key_env)env[p.key_env]=k.value.trim();
+  const m=document.getElementById('cfg-model-'+id);if(m&&p.model_env)env[p.model_env]=m.value;
+  if(m&&id===S.cfg.active)S.model=m.value;
+  try{await cfgPost({env});toast('Configuración guardada en .env','success');}
+  catch(e){toast(e.message,'error');}
+}
+async function cfgClearKey(id){
+  const p=(S.cfg.providers||[]).find(x=>x.id===id);if(!p||!p.key_env)return;
+  if(!confirm(`¿Borrar la API key de ${p.name}?`))return;
+  try{await cfgPost({env:{[p.key_env]:''}});toast('API key borrada','success');}
+  catch(e){toast(e.message,'error');}
+}
+async function cfgTestProvider(id){
+  toast('Probando conexión…','info');
+  try{const d=await cfgPost({});const p=(d.providers||[]).find(x=>x.id===id);
+    if(p&&p.online)toast(`${p.name}: ${p.model_count} modelo(s) disponibles ✓`,'success');
+    else toast(`${p?.name||id}: sin conexión. Revisa URL/API key.`,'error');
+  }catch(e){toast(e.message,'error');}
+}
+async function cfgSetPolicy(policy){
+  try{await cfgPost({router_policy:policy});toast(`Prioridad: ${_POL_LABEL[policy]||policy}`,'success');}
+  catch(e){toast(e.message,'error');}
+}
+async function cfgSaveSearch(id,keyEnv,clear){
+  const el=document.getElementById('cfg-skey-'+id);
+  const val=clear?'':(el?el.value.trim():'');
+  if(!clear&&!val){toast('Pega una API key primero.','error');return;}
+  try{await cfgPost({env:{[keyEnv]:val}});toast(clear?'API key borrada':'Buscador conectado ✓','success');}
+  catch(e){toast(e.message,'error');}
+}
+async function cfgToggleResearch(){
+  try{const d=await cfgPost({research_default:!S.cfg.research_default});
+    toast(d.research_default?'Búsqueda por defecto activada':'Búsqueda por defecto desactivada','success');
+  }catch(e){toast(e.message,'error');}
+}
+
+/* ═══════════════════════════════════════════
    UTIL
 ═══════════════════════════════════════════ */
 function esc(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+</script>
+<script>
+/* ── Matrix digital rain (ambient, GPU-light) ─────────── */
+(function(){
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  if(reduce) return;
+  const cv = document.getElementById('matrix-rain');
+  if(!cv) return;
+  const ctx = cv.getContext('2d');
+  const GLYPHS = 'アイウエオカキクケコサシスセソ0123456789<>[]{}#$%&*+=/\\|ABCDEF'.split('');
+  const FONT = 16;                 // glyph cell size (css px)
+  let cols, drops, dpr, w, h, raf;
+  function resize(){
+    dpr = Math.min(window.devicePixelRatio||1, 2);
+    w = cv.clientWidth; h = cv.clientHeight;
+    cv.width = w*dpr; cv.height = h*dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    cols = Math.ceil(w / FONT);
+    drops = new Array(cols).fill(0).map(()=> Math.random()*-40);
+  }
+  let last = 0;
+  function draw(ts){
+    raf = requestAnimationFrame(draw);
+    if(ts-last < 55) return;        // ~18fps: ambient, cheap
+    last = ts;
+    ctx.fillStyle = 'rgba(9,12,18,0.22)';   // trail fade
+    ctx.fillRect(0,0,w,h);
+    ctx.font = FONT+'px "JetBrains Mono", monospace';
+    for(let i=0;i<cols;i++){
+      const y = drops[i]*FONT;
+      const g = GLYPHS[(Math.random()*GLYPHS.length)|0];
+      // bright leading glyph, dimmer tail — classic rain look
+      ctx.fillStyle = Math.random()>0.94 ? 'rgba(180,255,210,0.95)' : 'rgba(61,186,111,0.80)';
+      ctx.fillText(g, i*FONT, y);
+      if(y>h && Math.random()>0.975) drops[i] = Math.random()*-20;
+      drops[i]++;
+    }
+  }
+  function start(){ if(!raf) raf=requestAnimationFrame(draw); }
+  function stop(){ if(raf){cancelAnimationFrame(raf); raf=null;} }
+  resize();
+  window.addEventListener('resize', ()=>{ clearTimeout(resize._t); resize._t=setTimeout(resize,150); });
+  // Pause when the tab is hidden to save CPU
+  document.addEventListener('visibilitychange', ()=> document.hidden ? stop() : start());
+  start();
+})();
 </script>
 </body>
 </html>

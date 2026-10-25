@@ -479,7 +479,8 @@ def _process_chat_turn(
             emit({"type": "done", "session": session_name})
             return
 
-        research_mode = bool(database.get_session_setting(session_name, "research_mode", False))
+        _research_default = os.environ.get("HACKERAGENT_RESEARCH_DEFAULT", "") == "1"
+        research_mode = bool(database.get_session_setting(session_name, "research_mode", _research_default))
         research_query = research_query_for_message(user_message, research_mode)
         research_turn = bool(research_query)
         research_context = ""
@@ -2330,6 +2331,153 @@ def api_router_policy():
     if current not in allowed:
         current = "balanced"
     return jsonify({"policy": current, "policies": allowed})
+
+
+# ── Centro de Configuración de IA (vista dedicada) ────────────────────────────
+_PROVIDER_META = {
+    "ollama": {
+        "name": "Ollama", "icon": "🦙", "kind": "local",
+        "url_env": "OLLAMA_URL", "key_env": "", "model_env": "",
+        "hint": "Servidor local de modelos. No requiere API key.",
+        "get_url": "https://ollama.com/download",
+    },
+    "lmstudio": {
+        "name": "LM Studio", "icon": "🖥️", "kind": "local",
+        "url_env": "LMSTUDIO_URL", "key_env": "", "model_env": "",
+        "hint": "App de escritorio con servidor local OpenAI-compatible.",
+        "get_url": "https://lmstudio.ai",
+    },
+    "deepseek": {
+        "name": "DeepSeek API", "icon": "🌐", "kind": "cloud",
+        "url_env": "DEEPSEEK_API_URL", "key_env": "DEEPSEEK_API_KEY", "model_env": "DEEPSEEK_MODEL",
+        "hint": "API en la nube. Requiere DEEPSEEK_API_KEY.",
+        "get_url": "https://platform.deepseek.com/api_keys",
+    },
+    "openrouter": {
+        "name": "OpenRouter", "icon": "🔀", "kind": "cloud",
+        "url_env": "OPENROUTER_API_URL", "key_env": "OPENROUTER_API_KEY", "model_env": "OPENROUTER_MODEL",
+        "hint": "Pasarela a cientos de modelos. Requiere API key.",
+        "get_url": "https://openrouter.ai/keys",
+    },
+}
+# Claves de entorno que la UI puede escribir en .env (lista blanca de seguridad).
+_CONFIG_WRITABLE_ENV = {
+    "OLLAMA_URL", "LMSTUDIO_URL",
+    "DEEPSEEK_API_URL", "DEEPSEEK_API_KEY", "DEEPSEEK_MODEL",
+    "OPENROUTER_API_URL", "OPENROUTER_API_KEY", "OPENROUTER_MODEL",
+    "TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY",
+}
+_SEARCH_META = [
+    {"id": "tavily", "name": "Tavily", "key_env": "TAVILY_API_KEY",
+     "hint": "Búsqueda optimizada para IA (recomendada).", "get_url": "https://app.tavily.com"},
+    {"id": "brave", "name": "Brave Search", "key_env": "BRAVE_SEARCH_API_KEY",
+     "hint": "API independiente con buen alcance.", "get_url": "https://brave.com/search/api/"},
+    {"id": "duckduckgo", "name": "DuckDuckGo", "key_env": "",
+     "hint": "Siempre disponible como respaldo, sin API key.", "get_url": ""},
+]
+
+def _mask_key(val: str) -> str:
+    val = (val or "").strip()
+    if not val:
+        return ""
+    return (val[:3] + "•" * max(4, len(val) - 7) + val[-4:]) if len(val) > 8 else "•" * len(val)
+
+
+@app.route("/api/config", methods=["GET"])
+def api_config_get():
+    """Estado completo para la vista de Configuración de IA."""
+    import agent as _ag
+    cached = _ag._CATALOG_CACHE.get("value")
+    catalog = [dict(i) for i in cached] if cached is not None else get_model_catalog()
+    by_backend = {}
+    for item in catalog:
+        by_backend.setdefault(item["backend"], []).append(item["model"])
+    disabled = _ag._parse_disabled_backends()
+
+    providers = []
+    for pid, meta in _PROVIDER_META.items():
+        models = sorted(by_backend.get(pid, []), key=lambda m: score_model(m)[0], reverse=True)
+        key_val = os.environ.get(meta["key_env"], "").strip() if meta["key_env"] else ""
+        providers.append({
+            "id": pid, "name": meta["name"], "icon": meta["icon"], "kind": meta["kind"],
+            "hint": meta["hint"], "get_url": meta["get_url"],
+            "url_env": meta["url_env"], "url": os.environ.get(meta["url_env"], "").strip(),
+            "key_env": meta["key_env"], "has_key": bool(key_val), "key_masked": _mask_key(key_val),
+            "model_env": meta["model_env"],
+            "model": os.environ.get(meta["model_env"], "").strip() if meta["model_env"] else "",
+            "enabled": pid not in disabled,
+            "online": bool(models), "model_count": len(models),
+            "models": [{"name": m, "stars": score_model(m)[0], "desc": score_model(m)[1]} for m in models[:60]],
+        })
+
+    search = []
+    for meta in _SEARCH_META:
+        key_val = os.environ.get(meta["key_env"], "").strip() if meta["key_env"] else ""
+        search.append({
+            "id": meta["id"], "name": meta["name"], "hint": meta["hint"], "get_url": meta["get_url"],
+            "key_env": meta["key_env"], "has_key": bool(key_val) if meta["key_env"] else True,
+            "key_masked": _mask_key(key_val), "always_on": not meta["key_env"],
+        })
+
+    return jsonify({
+        "active": _ag.LLM_BACKEND,
+        "router_policy": os.environ.get("HACKERAGENT_ROUTER_POLICY", "balanced").lower(),
+        "policies": {
+            "balanced": "Equilibrio entre calidad, latencia y ejecución local",
+            "quality": "Prioriza el modelo con mayor capacidad",
+            "local": "Prioriza Ollama/LM Studio y privacidad",
+            "cost": "Prioriza modelos locales o económicos",
+        },
+        "providers": providers,
+        "search": search,
+        "research_default": os.environ.get("HACKERAGENT_RESEARCH_DEFAULT", "") == "1",
+    })
+
+
+@app.route("/api/config", methods=["POST"])
+def api_config_post():
+    """Guarda configuración (claves .env, activar/desactivar, backend activo, política)."""
+    import agent as _ag
+    data = request.json or {}
+
+    # 1) Variables de entorno (lista blanca) → .env
+    env_updates = {}
+    for k, v in (data.get("env") or {}).items():
+        if k in _CONFIG_WRITABLE_ENV:
+            env_updates[k] = "" if v is None else str(v).strip()
+
+    # 2) Activar/desactivar backends
+    if "disabled" in data:
+        disabled = {b.strip().lower() for b in (data.get("disabled") or [])
+                    if b.strip().lower() in _ag.ALL_BACKENDS}
+        env_updates["HACKERAGENT_DISABLED_BACKENDS"] = ",".join(sorted(disabled))
+
+    # 3) Política del router
+    policy = str(data.get("router_policy", "")).lower().strip()
+    if policy in {"balanced", "quality", "local", "cost"}:
+        env_updates["HACKERAGENT_ROUTER_POLICY"] = policy
+
+    # 4) Búsqueda por defecto (modo investigación)
+    if "research_default" in data:
+        env_updates["HACKERAGENT_RESEARCH_DEFAULT"] = "1" if data.get("research_default") else ""
+
+    # 5) Backend activo (se persiste junto al resto en .env)
+    new_backend = str(data.get("active", "")).lower().strip()
+    if new_backend in ("auto", *_ag.ALL_BACKENDS):
+        _ag.LLM_BACKEND = new_backend
+        os.environ["HACKERAGENT_LLM_BACKEND"] = new_backend
+        env_updates["HACKERAGENT_LLM_BACKEND"] = new_backend
+        if new_backend in ("auto", "deepseek"):
+            os.environ["HACKERAGENT_FAST_MODE"] = "1"
+        else:
+            os.environ.pop("HACKERAGENT_FAST_MODE", None)
+
+    if env_updates:
+        _ag.save_env_vars(env_updates)
+
+    _ag.reload_backend_config()
+    get_model_catalog(force=True)
+    return api_config_get()
 
 
 @app.route("/api/projects/<proj_id>/report", methods=["POST"])

@@ -101,6 +101,18 @@ LLM_BACKEND      = _configured_backend if _configured_backend in {
 VERBOSE          = False
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# ── Backends habilitados/deshabilitados desde la UI de Configuración ───────────
+# HACKERAGENT_DISABLED_BACKENDS="deepseek,openrouter" excluye esos proveedores del
+# catálogo (Auto IA) y los muestra como desactivados en la vista de configuración.
+ALL_BACKENDS = ("ollama", "lmstudio", "deepseek", "openrouter")
+
+def _parse_disabled_backends() -> set:
+    raw = os.environ.get("HACKERAGENT_DISABLED_BACKENDS", "")
+    return {b.strip().lower() for b in raw.split(",") if b.strip().lower() in ALL_BACKENDS}
+
+def backend_enabled(backend: str) -> bool:
+    return backend.lower() not in _parse_disabled_backends()
+
 # Reutilizar conexiones reduce de forma visible la latencia de los ciclos
 # multi-turno y de los SubAgents, especialmente con la API remota de DeepSeek.
 _HTTP = requests.Session()
@@ -1002,6 +1014,56 @@ def save_api_key_to_env(key_name: str, value: str):
     os.environ[key_name] = value
 
 
+def save_env_vars(updates: dict) -> None:
+    """Escribe/actualiza varias claves en .env de una sola pasada.
+
+    Preserva comentarios y claves no tocadas. Un valor vacío ("") elimina la
+    clave del archivo (y del entorno), útil para 'borrar' una API key.
+    """
+    updates = {str(k).strip(): ("" if v is None else str(v)) for k, v in updates.items() if str(k).strip()}
+    if not updates:
+        return
+    remaining = dict(updates)
+    out_lines = []
+    if ENV_FILE.exists():
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            matched = next((k for k in remaining if s.startswith(f"{k}=") or s.startswith(f"{k} =")), None)
+            if matched is None:
+                out_lines.append(line)
+                continue
+            val = remaining.pop(matched)
+            if val != "":
+                out_lines.append(f'{matched}="{val}"')
+            # val == "" → se omite la línea (clave eliminada)
+    for k, val in remaining.items():
+        if val != "":
+            out_lines.append(f'{k}="{val}"')
+    ENV_FILE.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+    for k, val in updates.items():
+        if val == "":
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = val
+
+
+def reload_backend_config() -> None:
+    """Re-lee desde os.environ los globals de backend tras guardar la config."""
+    global OLLAMA_URL, LMSTUDIO_URL, DEEPSEEK_API_URL, DEEPSEEK_API_KEY, DEEPSEEK_MODEL
+    global OPENROUTER_API_URL, OPENROUTER_API_KEY, LLM_BACKEND
+    OLLAMA_URL       = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+    LMSTUDIO_URL     = _normalize_lmstudio_url(os.environ.get("LMSTUDIO_URL"))
+    DEEPSEEK_API_URL = os.environ.get("DEEPSEEK_API_URL", "https://api.deepseek.com/v1")
+    DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+    DEEPSEEK_MODEL   = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+    OPENROUTER_API_URL = os.environ.get("OPENROUTER_API_URL", "https://openrouter.ai/api/v1").rstrip("/")
+    OPENROUTER_API_KEY = os.environ.get("APIOPENROUTER", os.environ.get("OPENROUTER_API_KEY", ""))
+    _cfg = os.environ.get("HACKERAGENT_LLM_BACKEND", LLM_BACKEND).lower().strip()
+    if _cfg in {"auto", "ollama", "lmstudio", "deepseek", "openrouter"}:
+        LLM_BACKEND = _cfg
+    _CATALOG_CACHE.update(ts=0.0, value=None)
+
+
 def prompt_api_keys(key_names: list) -> dict:
     acquired = {}
     for key in key_names:
@@ -1297,6 +1359,9 @@ def get_model_catalog(force: bool = False) -> list[dict[str, str]]:
         "deepseek": check_deepseek,
         "openrouter": check_openrouter,
     }
+    # Excluir backends que el usuario desactivó en la Configuración.
+    disabled = _parse_disabled_backends()
+    providers = {b: fn for b, fn in providers.items() if b not in disabled}
     catalog = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(providers)) as executor:
         futures = {executor.submit(check): backend for backend, check in providers.items()}
